@@ -5,7 +5,7 @@ Stack: Node.js + Express + SQLite + React — tudo em um projeto só.
 
 ## Requisitos
 
-- [Node.js](https://nodejs.org) v18 ou superior (inclui o npm)
+- [Node.js](https://nodejs.org) v20 (inclui o npm)
 
 ## Instalação e uso
 

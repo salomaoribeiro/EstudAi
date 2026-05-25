@@ -1,0 +1,46 @@
+{
+  "usuarios": [
+    {
+      "id": 1,
+      "nome": "Salomão",
+      "cor": "#3B6D11",
+      "criado_em": "2026-05-25 14:07:26"
+    }
+  ],
+  "disciplinas": [],
+  "assuntos": [],
+  "sessoes": [],
+  "config": [],
+  "editais": [
+    {
+      "id": 1,
+      "usuario_id": null,
+      "nome": "TRT 6ª Região - Analista Judiciário (Tecnologia da Informação)",
+      "instituicao": "Tribunal Regional do Trabalho",
+      "data_prova": "2022-11-20",
+      "descricao": "",
+      "criado_em": "2026-05-25 14:28:36"
+    },
+    {
+      "id": 2,
+      "usuario_id": null,
+      "nome": "Banco do Brasil - Agente Comercial",
+      "instituicao": "Banco do Brasil S.A.",
+      "data_prova": "2023-05-15",
+      "descricao": "",
+      "criado_em": "2026-05-25 14:35:24"
+    },
+    {
+      "id": 4,
+      "usuario_id": null,
+      "nome": "Banco do Brasil - Agente de Tecnologia",
+      "instituicao": "Banco do Brasil S.A.",
+      "data_prova": "2022-12-04",
+      "descricao": "",
+      "criado_em": "2026-05-25 14:38:38"
+    }
+  ],
+  "edital_disciplinas": [],
+  "edital_assuntos": [],
+  "usuario_editais": []
+}

@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: estudai-app
+    ports:
+      - "3001:3001"
+      - "3000:3000"
+    volumes:
+      # Volume para persistência do banco de dados
+      - ./data:/data
+    environment:
+      - NODE_ENV=production
+      - DB_PATH=/data/estudai.db
+    restart: unless-stopped

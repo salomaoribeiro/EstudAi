@@ -13,7 +13,8 @@ export default function Grupo() {
 
   if (loading) return <div className="page-body" style={{ color:"var(--text-3)",paddingTop:"3rem",textAlign:"center" }}>Carregando...</div>;
 
-  const sorted = [...grupo].sort((a,b)=>b.streak-a.streak);
+  // Ordena o grupo pelo número de assuntos concluídos (maior primeiro)
+  const sorted = [...grupo].sort((a,b)=>b.concluidos-a.concluidos);
 
   return (
     <div>
@@ -42,8 +43,8 @@ export default function Grupo() {
                     {u.config?.nome_prova&&<div className="text-sm text-muted">{u.config.nome_prova}</div>}
                   </div>
                   <div style={{ textAlign:"right" }}>
-                    <div style={{ fontSize:22,fontWeight:700,color:u.cor }}>{u.streak}🔥</div>
-                    <div className="text-sm text-muted">dias seguidos</div>
+                    <div style={{ fontSize:22,fontWeight:700,color:u.cor }}>{u.concluidos}</div>
+                    <div className="text-sm text-muted">assuntos concluídos</div>
                   </div>
                 </div>
 

@@ -385,8 +385,18 @@ export default function Editais() {
 function TelaDetalheEdital({ edital, onBack, onEdit }) {
   const { usuario } = useUsuario();
   const { resumo, disciplinas } = edital;
+  const [busca, setBusca] = useState("");
   const [criandoDisciplinas, setCriandoDisciplinas] = useState(false);
   const [expandidos, setExpandidos] = useState({});
+
+  const disciplinasFiltradas = disciplinas.filter((d) => {
+    const termo = busca.trim().toLowerCase();
+    if (!termo) return true;
+    const buscaDisciplina = d.nome.toLowerCase().includes(termo);
+    const disciplinaEdicao = edital.edital.disciplinas.find((disc) => disc.nome === d.nome);
+    const buscaAssuntos = disciplinaEdicao?.assuntos?.some((ass) => ass.nome.toLowerCase().includes(termo));
+    return buscaDisciplina || buscaAssuntos;
+  });
 
   async function criarDisciplinasAutomaticas() {
     if (!edital.edital.disciplinas || edital.edital.disciplinas.length === 0) {
@@ -456,6 +466,32 @@ function TelaDetalheEdital({ edital, onBack, onEdit }) {
           </div>
         </div>
 
+        <div style={{ marginBottom: 20 }}>
+          <input
+            type="text"
+            placeholder="🔍 Buscar disciplina ou assunto..."
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "10px 14px",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-md)",
+              fontSize: 14,
+              fontFamily: "inherit",
+              backgroundColor: "var(--surface)",
+              color: "var(--text)",
+              boxSizing: "border-box"
+            }}
+          />
+        </div>
+
+        {busca && disciplinasFiltradas.length === 0 && (
+          <div className="empty-state" style={{ marginBottom: 20 }}>
+            <p>Nenhuma disciplina ou assunto encontrado para "{busca}"</p>
+          </div>
+        )}
+
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 30 }}>
           <div className="card" style={{ textAlign: "center", padding: 16 }}>
             <div style={{ fontSize: 28, fontWeight: 600, color: "#2563eb", marginBottom: 4 }}>
@@ -480,7 +516,7 @@ function TelaDetalheEdital({ edital, onBack, onEdit }) {
         <h3 style={{ marginBottom: 16, fontSize: 14 }}>Progresso por Disciplina</h3>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {disciplinas.map((d) => {
+          {disciplinasFiltradas.map((d) => {
             const badge = getStatusBadge(d.status);
             const isExpandido = expandidos[d.id];
             return (

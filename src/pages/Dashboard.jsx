@@ -343,7 +343,7 @@ export default function Dashboard() {
 
                       {/* Detalhes expandidos */}
                       {isExpandido && (
-                        <div style={{ marginTop: 8, marginLeft: 12, paddingLeft: 12, borderLeft: `3px solid ${statusColor}`, display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div style={{ marginTop: 8, marginLeft: 12, paddingLeft: 12, borderLeft: `3px solid ${statusColor}`, display: "flex", flexDirection: "column", gap: 12 }}>
                           <div style={{ fontSize: 13, fontWeight: 500, marginTop: 8 }}>Status: <span style={{ color: statusColor, fontWeight: 700 }}>{statusLabel}</span></div>
                           <div style={{ fontSize: 12, color: "var(--text-3)", lineHeight: 1.6 }}>
                             <div style={{ marginBottom: 8 }}>
@@ -352,8 +352,41 @@ export default function Dashboard() {
                             <div style={{ marginBottom: 8 }}>
                               <strong>Assuntos:</strong> {d.assuntos_estudados} de {d.assuntos_totais} estudados
                             </div>
+                            <div style={{ marginBottom: 8 }}>
+                              <strong>Concluídos:</strong> {d.assuntos_estudados} assuntos
+                            </div>
+                            <div style={{ marginBottom: 8 }}>
+                              <strong>Faltam:</strong> {d.assuntos_totais - d.assuntos_estudados} assuntos
+                            </div>
                             <div>
                               <strong>Tempo:</strong> {d.horasEstudadas} horas investidas
+                            </div>
+                          </div>
+
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                            <div style={{ background: "var(--gray-50)", borderRadius: "var(--radius-md)", padding: 12 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Concluídos ({d.assuntos?.filter(a => a.estudado).length || 0})</div>
+                              {d.assuntos?.filter(a => a.estudado).length > 0 ? (
+                                <ul style={{ margin: 0, marginLeft: 16, paddingRight: 4, maxHeight: 160, overflowY: "auto", fontSize: 12, color: "var(--text-3)" }}>
+                                  {d.assuntos.filter(a => a.estudado).map((assunto, index) => (
+                                    <li key={index} style={{ marginBottom: 4 }}>{assunto.nome}</li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <div style={{ fontSize: 12, color: "var(--text-3)" }}>Nenhum assunto concluído ainda.</div>
+                              )}
+                            </div>
+                            <div style={{ background: "var(--gray-50)", borderRadius: "var(--radius-md)", padding: 12 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Pendentes ({d.assuntos?.filter(a => !a.estudado).length || 0})</div>
+                              {d.assuntos?.filter(a => !a.estudado).length > 0 ? (
+                                <ul style={{ margin: 0, marginLeft: 16, paddingRight: 4, maxHeight: 160, overflowY: "auto", fontSize: 12, color: "var(--text-3)" }}>
+                                  {d.assuntos.filter(a => !a.estudado).map((assunto, index) => (
+                                    <li key={index} style={{ marginBottom: 4 }}>{assunto.nome}</li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <div style={{ fontSize: 12, color: "var(--text-3)" }}>Nada pendente — disciplina completa!</div>
+                              )}
                             </div>
                           </div>
                         </div>

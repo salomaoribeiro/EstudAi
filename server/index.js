@@ -5,7 +5,8 @@ const Database = require("better-sqlite3");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const db = new Database(path.join(__dirname, "estudai.db"));
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, "estudai.db");
+const db = new Database(DB_PATH);
 
 app.use(cors());
 app.use(express.json());
@@ -300,45 +301,42 @@ app.get("/api/editais/:eid/progresso", (req, res) => {
       SELECT * FROM edital_assuntos WHERE edital_disciplina_id = ?
     `).all(discEdital.id);
 
-    if (assuntosEdital.length === 0) {
+    // Buscar disciplinas do usuário para esta prova e encontrar a melhor correspondência
+    const userDisciplinas = db.prepare(`
+      SELECT * FROM disciplinas WHERE usuario_id = ?
+    `).all(uid);
+
+    const nomeEdital = discEdital.nome.trim().toLowerCase();
+    const userDisciplina = userDisciplinas.find(d => d.nome.trim().toLowerCase() === nomeEdital)
+      || userDisciplinas.find(d => d.nome.trim().toLowerCase().includes(nomeEdital))
+      || userDisciplinas.find(d => nomeEdital.includes(d.nome.trim().toLowerCase()));
+
+    const assuntosUser = userDisciplina
+      ? db.prepare(`
+          SELECT * FROM assuntos WHERE disciplina_id = ?
+        `).all(userDisciplina.id)
+      : [];
+
+    const assuntos = assuntosEdital.map(assunto => {
+      const matched = assuntosUser.find(u => u.nome.trim().toLowerCase() === assunto.nome.trim().toLowerCase());
+      const estudado = !!matched && matched.progresso > 0;
       return {
-        id: discEdital.id,
-        nome: discEdital.nome,
-        progresso: 0,
-        horasEstudadas: 0,
-        status: "nao_iniciada",
-        faltaEstudar: 100,
-        assuntos_totais: 0,
-        assuntos_estudados: 0
+        id: assunto.id,
+        nome: assunto.nome,
+        progresso: matched?.progresso || 0,
+        estudado
       };
-    }
+    });
 
-    // Buscar disciplina do usuário com mesmo nome
-    const userDisciplina = db.prepare(`
-      SELECT * FROM disciplinas WHERE usuario_id = ? AND LOWER(nome) LIKE ?
-      LIMIT 1
-    `).get(uid, `%${discEdital.nome.toLowerCase()}%`);
+    const assuntosEstudados = assuntos.filter(a => a.estudado).length;
+    const totalAssuntos = assuntos.length;
+    const horasEstudadas = userDisciplina
+      ? db.prepare(`
+          SELECT COALESCE(SUM(duracao_min), 0) AS total
+          FROM sessoes WHERE disciplina_id = ?
+        `).get(userDisciplina.id).total / 60
+      : 0;
 
-    let assuntosEstudados = 0;
-    let horasEstudadas = 0;
-
-    if (userDisciplina) {
-      // Buscar assuntos do usuário para esta disciplina
-      const assuntosUser = db.prepare(`
-        SELECT * FROM assuntos WHERE disciplina_id = ?
-      `).all(userDisciplina.id);
-
-      // Contar quantos assuntos o usuário estudou (progresso > 0)
-      assuntosEstudados = assuntosUser.filter(a => a.progresso > 0).length;
-
-      // Buscar horas estudadas
-      horasEstudadas = db.prepare(`
-        SELECT COALESCE(SUM(duracao_min), 0) AS total
-        FROM sessoes WHERE disciplina_id = ?
-      `).get(userDisciplina.id).total / 60;
-    }
-
-    const totalAssuntos = assuntosEdital.length;
     const progresso = totalAssuntos > 0
       ? Math.round((assuntosEstudados / totalAssuntos) * 100)
       : 0;
@@ -357,7 +355,10 @@ app.get("/api/editais/:eid/progresso", (req, res) => {
       status,
       faltaEstudar: 100 - progresso,
       assuntos_totais: totalAssuntos,
-      assuntos_estudados: assuntosEstudados
+      assuntos_estudados: assuntosEstudados,
+      assuntos_concluidos: assuntosEstudados,
+      assuntos_pendentes: totalAssuntos - assuntosEstudados,
+      assuntos
     };
   });
 

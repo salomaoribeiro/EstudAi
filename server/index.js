@@ -184,7 +184,7 @@ app.get("/api/editais", (req, res) => {
   `).all(uid || null);
 
   const getDiscs = db.prepare("SELECT ed.* FROM edital_disciplinas ed WHERE ed.edital_id = ? ORDER BY ed.nome");
-  const getAssuntos = db.prepare("SELECT * FROM edital_assuntos WHERE edital_disciplina_id = ? ORDER BY nome_no_edital");
+  const getAssuntos = db.prepare("SELECT *, nome_no_edital AS nome FROM edital_assuntos WHERE edital_disciplina_id = ? ORDER BY nome_no_edital");
 
   const resultado = editais.map(e => ({
     ...e,
@@ -209,7 +209,7 @@ app.get("/api/usuarios/:uid/editais", (req, res) => {
   `).all(req.params.uid);
 
   const getDiscs = db.prepare("SELECT ed.* FROM edital_disciplinas ed WHERE ed.edital_id = ? ORDER BY ed.nome");
-  const getAssuntos = db.prepare("SELECT * FROM edital_assuntos WHERE edital_disciplina_id = ? ORDER BY nome_no_edital");
+  const getAssuntos = db.prepare("SELECT *, nome_no_edital AS nome FROM edital_assuntos WHERE edital_disciplina_id = ? ORDER BY nome_no_edital");
 
   const resultado = editais.map(e => ({
     ...e,

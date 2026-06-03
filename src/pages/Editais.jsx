@@ -383,10 +383,8 @@ export default function Editais() {
 }
 
 function TelaDetalheEdital({ edital, onBack, onEdit }) {
-  const { usuario } = useUsuario();
   const { resumo, disciplinas } = edital;
   const [busca, setBusca] = useState("");
-  const [criandoDisciplinas, setCriandoDisciplinas] = useState(false);
   const [expandidos, setExpandidos] = useState({});
 
   const disciplinasFiltradas = disciplinas.filter((d) => {
@@ -397,38 +395,6 @@ function TelaDetalheEdital({ edital, onBack, onEdit }) {
     const buscaAssuntos = disciplinaEdicao?.assuntos?.some((ass) => ass.nome.toLowerCase().includes(termo));
     return buscaDisciplina || buscaAssuntos;
   });
-
-  async function criarDisciplinasAutomaticas() {
-    if (!edital.edital.disciplinas || edital.edital.disciplinas.length === 0) {
-      alert("Nenhuma disciplina cadastrada neste edital");
-      return;
-    }
-
-    setCriandoDisciplinas(true);
-    try {
-      let totalAssuntosAdicionados = 0;
-
-      for (const disc of edital.edital.disciplinas) {
-        // Criar a disciplina
-        const disciplinaCriada = await api.addDisciplina(usuario.id, { nome: disc.nome });
-
-        // Se a disciplina tem assuntos, adicionar todos eles
-        if (disc.assuntos && disc.assuntos.length > 0) {
-          const nomesAssuntos = disc.assuntos.map(a => a.nome);
-          await api.addAssunto(disciplinaCriada.id, { assuntos: nomesAssuntos });
-          totalAssuntosAdicionados += disc.assuntos.length;
-        }
-      }
-
-      const msg = `✓ Sucesso!\n\n${edital.edital.disciplinas.length} disciplinas criadas\n${totalAssuntosAdicionados} assuntos adicionados\n\nAgora você pode:\n✓ Ir para "Minhas Disciplinas" para estudar\n✓ Acompanhar seu progresso aqui`;
-      alert(msg);
-    } catch (e) {
-      console.error(e);
-      alert("Erro ao criar disciplinas: " + e.message);
-    } finally {
-      setCriandoDisciplinas(false);
-    }
-  }
 
   const getStatusBadge = (status) => {
     if (status === "completa") return { bg: "#065f46", color: "#10b981", label: "✓ Completa" };
@@ -443,14 +409,6 @@ function TelaDetalheEdital({ edital, onBack, onEdit }) {
           ← Editais
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button
-            className="btn btn-primary"
-            onClick={criarDisciplinasAutomaticas}
-            disabled={criandoDisciplinas}
-            style={{ background: "#3B6D11" }}
-          >
-            {criandoDisciplinas ? "Criando..." : "📚 Criar Disciplinas"}
-          </button>
           <button className="btn btn-primary" onClick={onEdit}>
             ✎ Editar
           </button>

@@ -5,7 +5,7 @@ const Database = require("better-sqlite3");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, "estudai.db");
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, "../data/estudai.db");
 const db = new Database(DB_PATH);
 
 app.use(cors());
@@ -22,33 +22,31 @@ db.exec(`
     criado_em TEXT DEFAULT (datetime('now','localtime'))
   );
 
-  CREATE TABLE IF NOT EXISTS disciplinas (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
-    nome       TEXT NOT NULL,
-    cor        TEXT NOT NULL DEFAULT '#3B6D11',
-    criado_em  TEXT DEFAULT (datetime('now','localtime'))
+  CREATE TABLE IF NOT EXISTS assuntos_catalogo (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome      TEXT NOT NULL UNIQUE,
+    criado_em TEXT DEFAULT (datetime('now','localtime'))
   );
 
-  CREATE TABLE IF NOT EXISTS assuntos (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    disciplina_id INTEGER NOT NULL REFERENCES disciplinas(id) ON DELETE CASCADE,
-    nome         TEXT NOT NULL,
-    progresso    INTEGER NOT NULL DEFAULT 0,
-    status       TEXT NOT NULL DEFAULT 'nao_iniciado',
-    criado_em    TEXT DEFAULT (datetime('now','localtime'))
+  CREATE TABLE IF NOT EXISTS usuario_progresso (
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    assunto_id INTEGER NOT NULL REFERENCES assuntos_catalogo(id) ON DELETE CASCADE,
+    progresso  INTEGER NOT NULL DEFAULT 0,
+    status     TEXT NOT NULL DEFAULT 'nao_iniciado',
+    atualizado_em TEXT DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (usuario_id, assunto_id)
   );
 
   CREATE TABLE IF NOT EXISTS sessoes (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    usuario_id    INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
-    assunto_id    INTEGER NOT NULL REFERENCES assuntos(id) ON DELETE CASCADE,
-    disciplina_id INTEGER NOT NULL,
-    duracao_min   INTEGER NOT NULL DEFAULT 0,
-    progresso_antes INTEGER NOT NULL DEFAULT 0,
-    progresso_depois INTEGER NOT NULL DEFAULT 0,
-    anotacao      TEXT DEFAULT '',
-    data          TEXT DEFAULT (datetime('now','localtime'))
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id           INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    assunto_id           INTEGER NOT NULL REFERENCES assuntos_catalogo(id) ON DELETE CASCADE,
+    edital_disciplina_id INTEGER REFERENCES edital_disciplinas(id) ON DELETE SET NULL,
+    duracao_min          INTEGER NOT NULL DEFAULT 0,
+    progresso_antes      INTEGER NOT NULL DEFAULT 0,
+    progresso_depois     INTEGER NOT NULL DEFAULT 0,
+    anotacao             TEXT DEFAULT '',
+    data                 TEXT DEFAULT (datetime('now','localtime'))
   );
 
   CREATE TABLE IF NOT EXISTS config (
@@ -77,10 +75,11 @@ db.exec(`
   );
 
   CREATE TABLE IF NOT EXISTS edital_assuntos (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
     edital_disciplina_id INTEGER NOT NULL REFERENCES edital_disciplinas(id) ON DELETE CASCADE,
-    nome         TEXT NOT NULL,
-    criado_em    TEXT DEFAULT (datetime('now','localtime'))
+    assunto_id           INTEGER NOT NULL REFERENCES assuntos_catalogo(id) ON DELETE CASCADE,
+    nome_no_edital       TEXT NOT NULL,
+    criado_em            TEXT DEFAULT (datetime('now','localtime'))
   );
 
   CREATE TABLE IF NOT EXISTS usuario_editais (
@@ -93,6 +92,21 @@ db.exec(`
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function ok(res, data) { res.json({ ok: true, data }); }
 function err(res, msg, status = 400) { res.status(status).json({ ok: false, error: msg }); }
+
+const CORES = ["#3B6D11","#185FA5","#854F0B","#534AB7","#993556","#0F6E56","#A32D2D","#5F5F58"];
+
+function upsertProgresso(uid, assuntoId, p) {
+  const status = p === 0 ? "nao_iniciado" : p === 100 ? "concluido" : "em_andamento";
+  db.prepare(`
+    INSERT INTO usuario_progresso (usuario_id, assunto_id, progresso, status)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(usuario_id, assunto_id) DO UPDATE SET
+      progresso = excluded.progresso,
+      status = excluded.status,
+      atualizado_em = datetime('now','localtime')
+  `).run(uid, assuntoId, p, status);
+  return status;
+}
 
 // ── Usuários ──────────────────────────────────────────────────────────────────
 app.get("/api/usuarios", (req, res) => {
@@ -114,69 +128,48 @@ app.delete("/api/usuarios/:id", (req, res) => {
   ok(res, null);
 });
 
-// ── Disciplinas ───────────────────────────────────────────────────────────────
+// ── Disciplinas (contexto edital) ─────────────────────────────────────────────
 app.get("/api/usuarios/:uid/disciplinas", (req, res) => {
-  const disciplinas = db.prepare("SELECT * FROM disciplinas WHERE usuario_id = ? ORDER BY nome").all(req.params.uid);
-  const result = disciplinas.map(d => {
-    const assuntos = db.prepare("SELECT * FROM assuntos WHERE disciplina_id = ? ORDER BY nome").all(d.id);
-    return { ...d, assuntos };
-  });
+  const uid = req.params.uid;
+  const config = db.prepare("SELECT edital_selecionado FROM config WHERE usuario_id = ?").get(uid);
+  if (!config?.edital_selecionado) return ok(res, []);
+
+  const disciplinas = db.prepare(`
+    SELECT ed.id, ed.nome
+    FROM edital_disciplinas ed
+    WHERE ed.edital_id = ?
+    ORDER BY ed.nome
+  `).all(config.edital_selecionado);
+
+  const getAssuntos = db.prepare(`
+    SELECT ac.id, ea.nome_no_edital AS nome,
+           COALESCE(up.progresso, 0) AS progresso,
+           COALESCE(up.status, 'nao_iniciado') AS status
+    FROM edital_assuntos ea
+    JOIN assuntos_catalogo ac ON ac.id = ea.assunto_id
+    LEFT JOIN usuario_progresso up ON up.assunto_id = ac.id AND up.usuario_id = ?
+    WHERE ea.edital_disciplina_id = ?
+    ORDER BY ea.nome_no_edital
+  `);
+
+  const result = disciplinas.map((d, i) => ({
+    ...d,
+    cor: CORES[i % CORES.length],
+    assuntos: getAssuntos.all(uid, d.id)
+  }));
+
   ok(res, result);
 });
 
-app.post("/api/usuarios/:uid/disciplinas", (req, res) => {
-  const { nome, cor = "#3B6D11" } = req.body;
-  if (!nome?.trim()) return err(res, "Nome obrigatório");
-  const r = db.prepare("INSERT INTO disciplinas (usuario_id, nome, cor) VALUES (?, ?, ?)").run(req.params.uid, nome.trim(), cor);
-  ok(res, db.prepare("SELECT * FROM disciplinas WHERE id = ?").get(r.lastInsertRowid));
-});
-
-app.delete("/api/usuarios/:uid/disciplinas/:id", (req, res) => {
-  db.prepare("DELETE FROM disciplinas WHERE id = ? AND usuario_id = ?").run(req.params.id, req.params.uid);
-  ok(res, null);
-});
-
-// ── Assuntos ──────────────────────────────────────────────────────────────────
-app.post("/api/disciplinas/:did/assuntos", (req, res) => {
-  const { nome, assuntos } = req.body;
-
-  // Se é um array de assuntos (criação em massa)
-  if (Array.isArray(assuntos)) {
-    const stmt = db.prepare("INSERT INTO assuntos (disciplina_id, nome) VALUES (?, ?)");
-    const resultado = [];
-    try {
-      for (const assunto of assuntos.filter(a => a?.trim())) {
-        const r = stmt.run(req.params.did, assunto.trim());
-        resultado.push({ id: r.lastInsertRowid, nome: assunto.trim() });
-      }
-      ok(res, resultado);
-    } catch (e) {
-      err(res, e.message);
-    }
-    return;
-  }
-
-  // Se é um único assunto
-  if (!nome?.trim()) return err(res, "Nome obrigatório");
-  const r = db.prepare("INSERT INTO assuntos (disciplina_id, nome) VALUES (?, ?)").run(req.params.did, nome.trim());
-  ok(res, db.prepare("SELECT * FROM assuntos WHERE id = ?").get(r.lastInsertRowid));
-});
-
-app.patch("/api/assuntos/:id", (req, res) => {
+// ── Progresso de assunto ──────────────────────────────────────────────────────
+app.patch("/api/usuarios/:uid/assuntos/:id", (req, res) => {
   const { progresso } = req.body;
   const p = Math.max(0, Math.min(100, Number(progresso)));
-  const status = p === 0 ? "nao_iniciado" : p === 100 ? "concluido" : "em_andamento";
-  db.prepare("UPDATE assuntos SET progresso = ?, status = ? WHERE id = ?").run(p, status, req.params.id);
-  ok(res, db.prepare("SELECT * FROM assuntos WHERE id = ?").get(req.params.id));
-});
-
-app.delete("/api/assuntos/:id", (req, res) => {
-  db.prepare("DELETE FROM assuntos WHERE id = ?").run(req.params.id);
-  ok(res, null);
+  const status = upsertProgresso(req.params.uid, req.params.id, p);
+  ok(res, { id: Number(req.params.id), progresso: p, status });
 });
 
 // ── Editais ───────────────────────────────────────────────────────────────────
-// Todos os editais globais (com checkbox de inscrição do usuário)
 app.get("/api/editais", (req, res) => {
   const uid = req.query.uid;
   const editais = db.prepare(`
@@ -190,26 +183,20 @@ app.get("/api/editais", (req, res) => {
     ORDER BY e.data_prova, e.nome
   `).all(uid || null);
 
-  const resultado = editais.map(e => {
-    const disciplinas = db.prepare(`
-      SELECT ed.* FROM edital_disciplinas ed WHERE ed.edital_id = ? ORDER BY ed.nome
-    `).all(e.id);
+  const getDiscs = db.prepare("SELECT ed.* FROM edital_disciplinas ed WHERE ed.edital_id = ? ORDER BY ed.nome");
+  const getAssuntos = db.prepare("SELECT * FROM edital_assuntos WHERE edital_disciplina_id = ? ORDER BY nome_no_edital");
 
-    // Enriquecer cada disciplina com seus assuntos
-    const disciplinasEnriquecidas = disciplinas.map(d => {
-      const assuntos = db.prepare(`
-        SELECT * FROM edital_assuntos WHERE edital_disciplina_id = ? ORDER BY nome
-      `).all(d.id);
-      return { ...d, assuntos };
-    });
-
-    return { ...e, disciplinas: disciplinasEnriquecidas };
-  });
+  const resultado = editais.map(e => ({
+    ...e,
+    disciplinas: getDiscs.all(e.id).map(d => ({
+      ...d,
+      assuntos: getAssuntos.all(d.id)
+    }))
+  }));
 
   ok(res, resultado);
 });
 
-// Editais inscritos do usuário
 app.get("/api/usuarios/:uid/editais", (req, res) => {
   const editais = db.prepare(`
     SELECT e.*, COUNT(ed.id) AS total_disciplinas
@@ -221,26 +208,20 @@ app.get("/api/usuarios/:uid/editais", (req, res) => {
     ORDER BY e.data_prova, e.nome
   `).all(req.params.uid);
 
-  const resultado = editais.map(e => {
-    const disciplinas = db.prepare(`
-      SELECT ed.* FROM edital_disciplinas ed WHERE ed.edital_id = ? ORDER BY ed.nome
-    `).all(e.id);
+  const getDiscs = db.prepare("SELECT ed.* FROM edital_disciplinas ed WHERE ed.edital_id = ? ORDER BY ed.nome");
+  const getAssuntos = db.prepare("SELECT * FROM edital_assuntos WHERE edital_disciplina_id = ? ORDER BY nome_no_edital");
 
-    // Enriquecer cada disciplina com seus assuntos
-    const disciplinasEnriquecidas = disciplinas.map(d => {
-      const assuntos = db.prepare(`
-        SELECT * FROM edital_assuntos WHERE edital_disciplina_id = ? ORDER BY nome
-      `).all(d.id);
-      return { ...d, assuntos };
-    });
-
-    return { ...e, disciplinas: disciplinasEnriquecidas };
-  });
+  const resultado = editais.map(e => ({
+    ...e,
+    disciplinas: getDiscs.all(e.id).map(d => ({
+      ...d,
+      assuntos: getAssuntos.all(d.id)
+    }))
+  }));
 
   ok(res, resultado);
 });
 
-// Criar edital global
 app.post("/api/editais", (req, res) => {
   const { nome, instituicao, data_prova, descricao, disciplinas } = req.body;
   if (!nome?.trim()) return err(res, "Nome obrigatório");
@@ -252,7 +233,6 @@ app.post("/api/editais", (req, res) => {
 
   const editalId = r.lastInsertRowid;
 
-  // Inserir disciplinas
   if (Array.isArray(disciplinas)) {
     const stmt = db.prepare("INSERT INTO edital_disciplinas (edital_id, nome) VALUES (?, ?)");
     for (const disc of disciplinas.filter(d => d?.trim())) {
@@ -265,7 +245,6 @@ app.post("/api/editais", (req, res) => {
   ok(res, { ...edital, disciplinas: disList, inscrito: 0 });
 });
 
-// Inscrever usuário em edital
 app.post("/api/usuarios/:uid/editais/:eid/subscrever", (req, res) => {
   try {
     db.prepare("INSERT INTO usuario_editais (usuario_id, edital_id) VALUES (?, ?)")
@@ -276,7 +255,6 @@ app.post("/api/usuarios/:uid/editais/:eid/subscrever", (req, res) => {
   }
 });
 
-// Desinscrever usuário de edital
 app.delete("/api/usuarios/:uid/editais/:eid/subscrever", (req, res) => {
   db.prepare("DELETE FROM usuario_editais WHERE usuario_id = ? AND edital_id = ?")
     .run(req.params.uid, req.params.eid);
@@ -290,66 +268,42 @@ app.get("/api/editais/:eid/progresso", (req, res) => {
   const edital = db.prepare("SELECT * FROM editais WHERE id = ?").get(req.params.eid);
   if (!edital) return err(res, "Edital não encontrado", 404);
 
-  // Buscar disciplinas do edital com seus assuntos
-  const disciplinasEdital = db.prepare(`
-    SELECT ed.* FROM edital_disciplinas ed WHERE ed.edital_id = ?
+  const disciplinas = db.prepare(`
+    SELECT ed.* FROM edital_disciplinas ed WHERE ed.edital_id = ? ORDER BY ed.nome
   `).all(req.params.eid);
 
-  const resultado = disciplinasEdital.map(discEdital => {
-    // Buscar assuntos do edital para esta disciplina
-    const assuntosEdital = db.prepare(`
-      SELECT * FROM edital_assuntos WHERE edital_disciplina_id = ?
-    `).all(discEdital.id);
+  const getAssuntos = db.prepare(`
+    SELECT ac.id, ea.nome_no_edital AS nome,
+           COALESCE(up.progresso, 0) AS progresso,
+           COALESCE(up.status, 'nao_iniciado') AS status,
+           CASE WHEN COALESCE(up.progresso, 0) > 0 THEN 1 ELSE 0 END AS estudado
+    FROM edital_assuntos ea
+    JOIN assuntos_catalogo ac ON ac.id = ea.assunto_id
+    LEFT JOIN usuario_progresso up ON up.assunto_id = ac.id AND up.usuario_id = ?
+    WHERE ea.edital_disciplina_id = ?
+    ORDER BY ea.nome_no_edital
+  `);
 
-    // Buscar disciplinas do usuário para esta prova e encontrar a melhor correspondência
-    const userDisciplinas = db.prepare(`
-      SELECT * FROM disciplinas WHERE usuario_id = ?
-    `).all(uid);
+  const getHoras = db.prepare(`
+    SELECT COALESCE(SUM(duracao_min), 0) AS total
+    FROM sessoes WHERE edital_disciplina_id = ? AND usuario_id = ?
+  `);
 
-    const nomeEdital = discEdital.nome.trim().toLowerCase();
-    const userDisciplina = userDisciplinas.find(d => d.nome.trim().toLowerCase() === nomeEdital)
-      || userDisciplinas.find(d => d.nome.trim().toLowerCase().includes(nomeEdital))
-      || userDisciplinas.find(d => nomeEdital.includes(d.nome.trim().toLowerCase()));
-
-    const assuntosUser = userDisciplina
-      ? db.prepare(`
-          SELECT * FROM assuntos WHERE disciplina_id = ?
-        `).all(userDisciplina.id)
-      : [];
-
-    const assuntos = assuntosEdital.map(assunto => {
-      const matched = assuntosUser.find(u => u.nome.trim().toLowerCase() === assunto.nome.trim().toLowerCase());
-      const estudado = !!matched && matched.progresso > 0;
-      return {
-        id: assunto.id,
-        nome: assunto.nome,
-        progresso: matched?.progresso || 0,
-        estudado
-      };
-    });
-
+  const resultado = disciplinas.map(disc => {
+    const assuntos = getAssuntos.all(uid, disc.id);
     const assuntosEstudados = assuntos.filter(a => a.estudado).length;
     const totalAssuntos = assuntos.length;
-    const horasEstudadas = userDisciplina
-      ? db.prepare(`
-          SELECT COALESCE(SUM(duracao_min), 0) AS total
-          FROM sessoes WHERE disciplina_id = ?
-        `).get(userDisciplina.id).total / 60
-      : 0;
+    const horasEstudadas = getHoras.get(disc.id, uid).total / 60;
+    const progresso = totalAssuntos > 0 ? Math.round((assuntosEstudados / totalAssuntos) * 100) : 0;
 
-    const progresso = totalAssuntos > 0
-      ? Math.round((assuntosEstudados / totalAssuntos) * 100)
-      : 0;
-
-    let status = "nao_iniciada";
+    let status = "urgente";
     if (progresso >= 75) status = "completa";
     else if (progresso >= 25) status = "em_progresso";
     else if (progresso > 0) status = "iniciada";
-    else status = "urgente";
 
     return {
-      id: discEdital.id,
-      nome: discEdital.nome,
+      id: disc.id,
+      nome: disc.nome,
       progresso,
       horasEstudadas: Math.round(horasEstudadas * 10) / 10,
       status,
@@ -362,26 +316,20 @@ app.get("/api/editais/:eid/progresso", (req, res) => {
     };
   });
 
-  // Calcula progresso geral
   const progressoGeral = resultado.length > 0
     ? Math.round(resultado.reduce((sum, d) => sum + d.progresso, 0) / resultado.length)
     : 0;
-
-  const completadas = resultado.filter(d => d.status === "completa").length;
-  const urgentes = resultado.filter(d => d.status === "urgente").length;
-  const totalAssuntosGeral = resultado.reduce((sum, d) => sum + d.assuntos_totais, 0);
-  const assuntosEstudadosGeral = resultado.reduce((sum, d) => sum + d.assuntos_estudados, 0);
 
   ok(res, {
     edital,
     disciplinas: resultado,
     resumo: {
       progressoGeral,
-      completadas,
-      urgentes,
+      completadas: resultado.filter(d => d.status === "completa").length,
+      urgentes: resultado.filter(d => d.status === "urgente").length,
       total: resultado.length,
-      totalAssuntos: totalAssuntosGeral,
-      assuntosEstudados: assuntosEstudadosGeral
+      totalAssuntos: resultado.reduce((sum, d) => sum + d.assuntos_totais, 0),
+      assuntosEstudados: resultado.reduce((sum, d) => sum + d.assuntos_estudados, 0)
     }
   });
 });
@@ -390,13 +338,11 @@ app.put("/api/editais/:id", (req, res) => {
   const { nome, instituicao, data_prova, descricao, disciplinas } = req.body;
   const id = req.params.id;
 
-  // Atualizar edital
   db.prepare(`
     UPDATE editais SET nome = ?, instituicao = ?, data_prova = ?, descricao = ?
     WHERE id = ?
   `).run(nome || "", instituicao || "", data_prova || "", descricao || "", id);
 
-  // Se disciplinas foram passadas, atualizar
   if (Array.isArray(disciplinas)) {
     db.prepare("DELETE FROM edital_disciplinas WHERE edital_id = ?").run(id);
     const stmt = db.prepare("INSERT INTO edital_disciplinas (edital_id, nome) VALUES (?, ?)");
@@ -410,7 +356,6 @@ app.put("/api/editais/:id", (req, res) => {
   ok(res, { ...edital, disciplinas: disList });
 });
 
-// Deletar edital global
 app.delete("/api/editais/:id", (req, res) => {
   db.prepare("DELETE FROM editais WHERE id = ?").run(req.params.id);
   ok(res, null);
@@ -421,13 +366,20 @@ app.post("/api/edital-disciplinas/:did/assuntos", (req, res) => {
   const { assuntos } = req.body;
   if (!Array.isArray(assuntos)) return err(res, "assuntos deve ser um array");
 
-  const stmt = db.prepare("INSERT INTO edital_assuntos (edital_disciplina_id, nome) VALUES (?, ?)");
+  const insertCatalog = db.prepare("INSERT OR IGNORE INTO assuntos_catalogo (nome) VALUES (?)");
+  const getCatalogId = db.prepare("SELECT id FROM assuntos_catalogo WHERE nome = ?");
+  const insertEdital = db.prepare(
+    "INSERT INTO edital_assuntos (edital_disciplina_id, assunto_id, nome_no_edital) VALUES (?, ?, ?)"
+  );
   const resultado = [];
 
   try {
-    for (const assunto of assuntos.filter(a => a?.trim())) {
-      const r = stmt.run(req.params.did, assunto.trim());
-      resultado.push({ id: r.lastInsertRowid, nome: assunto.trim() });
+    for (const nome of assuntos.filter(a => a?.trim())) {
+      const trimmed = nome.trim();
+      insertCatalog.run(trimmed);
+      const { id: assuntoId } = getCatalogId.get(trimmed);
+      const r = insertEdital.run(req.params.did, assuntoId, trimmed);
+      resultado.push({ id: r.lastInsertRowid, nome: trimmed, assunto_id: assuntoId });
     }
     ok(res, resultado);
   } catch (e) {
@@ -438,10 +390,12 @@ app.post("/api/edital-disciplinas/:did/assuntos", (req, res) => {
 // ── Sessões ───────────────────────────────────────────────────────────────────
 app.get("/api/usuarios/:uid/sessoes", (req, res) => {
   ok(res, db.prepare(`
-    SELECT s.*, a.nome AS assunto_nome, d.nome AS disciplina_nome, d.cor AS disciplina_cor
+    SELECT s.*, ac.nome AS assunto_nome,
+           COALESCE(ed.nome, '') AS disciplina_nome,
+           '#3B6D11' AS disciplina_cor
     FROM sessoes s
-    JOIN assuntos a ON a.id = s.assunto_id
-    JOIN disciplinas d ON d.id = s.disciplina_id
+    JOIN assuntos_catalogo ac ON ac.id = s.assunto_id
+    LEFT JOIN edital_disciplinas ed ON ed.id = s.edital_disciplina_id
     WHERE s.usuario_id = ?
     ORDER BY s.data DESC
     LIMIT 50
@@ -449,16 +403,16 @@ app.get("/api/usuarios/:uid/sessoes", (req, res) => {
 });
 
 app.post("/api/usuarios/:uid/sessoes", (req, res) => {
+  const uid = req.params.uid;
   const { assunto_id, disciplina_id, duracao_min, progresso_antes, progresso_depois, anotacao } = req.body;
-  const r = db.prepare(`
-    INSERT INTO sessoes (usuario_id, assunto_id, disciplina_id, duracao_min, progresso_antes, progresso_depois, anotacao)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(req.params.uid, assunto_id, disciplina_id, duracao_min, progresso_antes, progresso_depois, anotacao || "");
 
-  // Atualiza progresso do assunto
+  const r = db.prepare(`
+    INSERT INTO sessoes (usuario_id, assunto_id, edital_disciplina_id, duracao_min, progresso_antes, progresso_depois, anotacao)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(uid, assunto_id, disciplina_id || null, duracao_min, progresso_antes, progresso_depois, anotacao || "");
+
   const p = Math.max(0, Math.min(100, Number(progresso_depois)));
-  const status = p === 0 ? "nao_iniciado" : p === 100 ? "concluido" : "em_andamento";
-  db.prepare("UPDATE assuntos SET progresso = ?, status = ? WHERE id = ?").run(p, status, assunto_id);
+  upsertProgresso(uid, assunto_id, p);
 
   ok(res, db.prepare("SELECT * FROM sessoes WHERE id = ?").get(r.lastInsertRowid));
 });
@@ -485,17 +439,19 @@ app.put("/api/usuarios/:uid/config", (req, res) => {
 // ── Grupo ─────────────────────────────────────────────────────────────────────
 app.get("/api/grupo", (req, res) => {
   const usuarios = db.prepare("SELECT * FROM usuarios ORDER BY nome").all();
+
+  const getProgresso = db.prepare(`
+    SELECT COUNT(*) AS total,
+           SUM(CASE WHEN status = 'concluido' THEN 1 ELSE 0 END) AS concluidos
+    FROM usuario_progresso WHERE usuario_id = ?
+  `);
+
+  const hojeStr = new Date().toISOString().slice(0, 10);
+
   const resultado = usuarios.map(u => {
-    const assuntos = db.prepare(`
-      SELECT a.* FROM assuntos a
-      JOIN disciplinas d ON d.id = a.disciplina_id
-      WHERE d.usuario_id = ?
-    `).all(u.id);
-    const total = assuntos.length;
-    const concluidos = assuntos.filter(a => a.status === "concluido").length;
+    const { total, concluidos } = getProgresso.get(u.id);
     const progresso = total ? Math.round((concluidos / total) * 100) : 0;
 
-    const hojeStr = new Date().toISOString().slice(0, 10);
     const minHoje = db.prepare(`
       SELECT COALESCE(SUM(duracao_min),0) AS total
       FROM sessoes WHERE usuario_id = ? AND date(data) = ?
@@ -506,6 +462,7 @@ app.get("/api/grupo", (req, res) => {
 
     return { ...u, total, concluidos, progresso, minHoje, streak, config };
   });
+
   ok(res, resultado);
 });
 

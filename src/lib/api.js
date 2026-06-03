@@ -17,15 +17,11 @@ export const api = {
   addUsuario: (data) => req("POST", "/usuarios", data),
   deleteUsuario: (id) => req("DELETE", `/usuarios/${id}`),
 
-  // Disciplinas
+  // Disciplinas (retorna do edital selecionado)
   getDisciplinas: (uid) => req("GET", `/usuarios/${uid}/disciplinas`),
-  addDisciplina: (uid, data) => req("POST", `/usuarios/${uid}/disciplinas`, data),
-  deleteDisciplina: (uid, id) => req("DELETE", `/usuarios/${uid}/disciplinas/${id}`),
 
-  // Assuntos
-  addAssunto: (did, data) => req("POST", `/disciplinas/${did}/assuntos`, data),
-  updateAssunto: (id, data) => req("PATCH", `/assuntos/${id}`, data),
-  deleteAssunto: (id) => req("DELETE", `/assuntos/${id}`),
+  // Progresso de assunto (id = catalog assunto_id)
+  updateAssunto: (uid, id, data) => req("PATCH", `/usuarios/${uid}/assuntos/${id}`, data),
 
   // Sessões
   getSessoes: (uid) => req("GET", `/usuarios/${uid}/sessoes`),
@@ -43,9 +39,9 @@ export const api = {
   getGrupo: () => req("GET", "/grupo"),
 
   // Editais
-  getTodosEditais: (uid) => req("GET", `/editais?uid=${uid}`),  // Todos com checkbox
-  getEditais: (uid) => req("GET", `/usuarios/${uid}/editais`),  // Apenas inscritos
-  addEdital: (data) => req("POST", `/editais`, data),           // Cria global
+  getTodosEditais: (uid) => req("GET", `/editais?uid=${uid}`),
+  getEditais: (uid) => req("GET", `/usuarios/${uid}/editais`),
+  addEdital: (data) => req("POST", `/editais`, data),
   updateEdital: (id, data) => req("PUT", `/editais/${id}`, data),
   getEditalProgresso: (eid, uid) => req("GET", `/editais/${eid}/progresso?uid=${uid}`),
   deleteEdital: (id) => req("DELETE", `/editais/${id}`),

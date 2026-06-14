@@ -6,9 +6,18 @@
   --blue-50:#E6F1FB;--blue-400:#378ADD;--blue-600:#185FA5;
   --red-50:#FCEBEB;--red-400:#E24B4A;--red-600:#A32D2D;
   --gray-50:#F7F7F5;--gray-100:#EFEFEB;--gray-200:#E0E0D8;--gray-400:#9A9A90;--gray-600:#5F5F58;--gray-900:#1A1A18;
-  --bg:#F4F4F0;--surface:#FFFFFF;--border:#E4E4DC;--text:#1A1A18;--text-2:#5F5F58;--text-3:#9A9A90;
+  --bg:#F4F4F0;--bg-2:#FAFAF8;--surface:#FFFFFF;--border:#E4E4DC;--text:#1A1A18;--text-2:#5F5F58;--text-3:#9A9A90;
   --radius-sm:6px;--radius-md:10px;--radius-lg:14px;
   --font:'DM Sans',sans-serif;--mono:'DM Mono',monospace;
+}
+
+[data-theme="dark"] {
+  --green-50:#162610;--green-100:#243E18;--green-400:#7DBF3A;--green-600:#5A9A1E;--green-800:#A3D860;
+  --amber-50:#2A1C00;--amber-400:#E8A030;--amber-600:#C47820;
+  --blue-50:#0A1C30;--blue-400:#5BA5F0;--blue-600:#3B7DD8;
+  --red-50:#2D0E0E;--red-400:#F07070;--red-600:#D44040;
+  --gray-50:#2A2A28;--gray-100:#333330;--gray-200:#48484A;--gray-400:#A0A09A;--gray-600:#C8C8C0;--gray-900:#F0F0EC;
+  --bg:#18181A;--bg-2:#222224;--surface:#27272A;--border:#3F3F46;--text:#FAFAFA;--text-2:#A1A1AA;--text-3:#71717A;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased;}
@@ -68,7 +77,7 @@ input,select,textarea{font-family:var(--font);}
 .form-input:focus{border-color:var(--green-400);}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
 
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:999;padding:1rem;}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:999;padding:1rem;}
 .modal{background:var(--surface);border-radius:var(--radius-lg);padding:1.5rem;width:100%;max-width:460px;border:1px solid var(--border);}
 .modal-title{font-size:17px;font-weight:600;margin-bottom:1.25rem;}
 .modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:1.25rem;}

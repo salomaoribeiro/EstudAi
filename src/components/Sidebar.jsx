@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useUsuario } from "../hooks/useUsuario";
+import { useTheme } from "../hooks/useTheme";
 
 const links = [
   { path: "/",            label: "Dashboard",      icon: "⊞" },
@@ -18,6 +19,7 @@ export default function Sidebar() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { usuario, logout } = useUsuario();
+  const { theme, toggle } = useTheme();
   const hoje = new Date().toLocaleDateString("pt-BR", { weekday:"long", day:"numeric", month:"short" });
 
   return (
@@ -36,6 +38,22 @@ export default function Sidebar() {
       </nav>
       <div className="sidebar-footer">
         <div className="text-muted text-sm mb-1">{hoje}</div>
+        <button
+          onClick={toggle}
+          title={theme === "dark" ? "Mudar para tema claro" : "Mudar para tema escuro"}
+          style={{
+            display:"flex", alignItems:"center", gap:8,
+            width:"100%", padding:"6px 10px", marginBottom:8,
+            border:"1px solid var(--border)", borderRadius:"var(--radius-md)",
+            background:"var(--surface)", color:"var(--text-2)",
+            fontSize:13, cursor:"pointer", transition:"background .12s",
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = "var(--gray-50)"}
+          onMouseLeave={e => e.currentTarget.style.background = "var(--surface)"}
+        >
+          <span style={{ fontSize:15 }}>{theme === "dark" ? "☀" : "☾"}</span>
+          {theme === "dark" ? "Tema Claro" : "Tema Escuro"}
+        </button>
         {usuario && (
           <div className="user-chip" onClick={logout} title="Trocar usuário">
             <div style={{ width:26,height:26,borderRadius:"50%",background:usuario.cor,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:600,color:"#fff",flexShrink:0 }}>

@@ -361,6 +361,47 @@ app.delete("/api/editais/:id", (req, res) => {
   ok(res, null);
 });
 
+// Adicionar disciplina a um edital
+app.post("/api/editais/:eid/disciplinas", (req, res) => {
+  const { nome } = req.body;
+  if (!nome?.trim()) return err(res, "Nome obrigatório");
+  try {
+    const r = db.prepare("INSERT INTO edital_disciplinas (edital_id, nome) VALUES (?, ?)")
+      .run(req.params.eid, nome.trim());
+    ok(res, { id: r.lastInsertRowid, nome: nome.trim() });
+  } catch (e) { err(res, e.message); }
+});
+
+// Renomear disciplina
+app.put("/api/edital-disciplinas/:id", (req, res) => {
+  const { nome } = req.body;
+  if (!nome?.trim()) return err(res, "Nome obrigatório");
+  db.prepare("UPDATE edital_disciplinas SET nome = ? WHERE id = ?").run(nome.trim(), req.params.id);
+  ok(res, { id: Number(req.params.id), nome: nome.trim() });
+});
+
+// Remover disciplina
+app.delete("/api/edital-disciplinas/:id", (req, res) => {
+  db.prepare("DELETE FROM edital_disciplinas WHERE id = ?").run(req.params.id);
+  ok(res, null);
+});
+
+// Editar assunto de uma disciplina (pelo catalog id)
+app.put("/api/edital-disciplinas/:did/assuntos/:aid", (req, res) => {
+  const { nome } = req.body;
+  if (!nome?.trim()) return err(res, "Nome obrigatório");
+  db.prepare("UPDATE edital_assuntos SET nome_no_edital = ? WHERE edital_disciplina_id = ? AND assunto_id = ?")
+    .run(nome.trim(), req.params.did, req.params.aid);
+  ok(res, { nome: nome.trim() });
+});
+
+// Remover assunto de uma disciplina (pelo catalog id)
+app.delete("/api/edital-disciplinas/:did/assuntos/:aid", (req, res) => {
+  db.prepare("DELETE FROM edital_assuntos WHERE edital_disciplina_id = ? AND assunto_id = ?")
+    .run(req.params.did, req.params.aid);
+  ok(res, null);
+});
+
 // Adicionar assuntos a uma disciplina de edital
 app.post("/api/edital-disciplinas/:did/assuntos", (req, res) => {
   const { assuntos } = req.body;

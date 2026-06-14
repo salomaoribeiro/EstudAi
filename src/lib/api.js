@@ -47,4 +47,12 @@ export const api = {
   deleteEdital: (id) => req("DELETE", `/editais/${id}`),
   inscreverEdital: (uid, eid) => req("POST", `/usuarios/${uid}/editais/${eid}/subscrever`, {}),
   desinscreverEdital: (uid, eid) => req("DELETE", `/usuarios/${uid}/editais/${eid}/subscrever`),
+
+  // Disciplinas do edital
+  addDisciplina: (eid, nome) => req("POST", `/editais/${eid}/disciplinas`, { nome }),
+  updateDisciplina: (id, nome) => req("PUT", `/edital-disciplinas/${id}`, { nome }),
+  deleteDisciplina: (id) => req("DELETE", `/edital-disciplinas/${id}`),
+  addAssuntosDisc: (did, assuntos) => req("POST", `/edital-disciplinas/${did}/assuntos`, { assuntos }),
+  updateAssuntoDisc: (did, aid, nome) => req("PUT", `/edital-disciplinas/${did}/assuntos/${aid}`, { nome }),
+  deleteAssuntoDisc: (did, aid) => req("DELETE", `/edital-disciplinas/${did}/assuntos/${aid}`),
 };

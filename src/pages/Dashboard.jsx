@@ -60,6 +60,12 @@ export default function Dashboard() {
     }
   }
 
+  async function marcarAssunto(assuntoId, concluido) {
+    await api.updateAssunto(usuario.id, assuntoId, { progresso: concluido ? 100 : 0 });
+    const progresso = await api.getEditalProgresso(proximoEdital.id, usuario.id);
+    setProximoEdital(prev => ({ ...prev, progresso: progresso.resumo, disciplinas: progresso.disciplinas }));
+  }
+
   if (!stats) return <div className="page-body" style={{ color:"var(--text-3)",paddingTop:"3rem",textAlign:"center" }}>Carregando...</div>;
 
   const meta = config?.meta_min_dia || 60;
@@ -367,9 +373,19 @@ export default function Dashboard() {
                             <div style={{ background: "var(--gray-50)", borderRadius: "var(--radius-md)", padding: 12 }}>
                               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Concluídos ({d.assuntos?.filter(a => a.estudado).length || 0})</div>
                               {d.assuntos?.filter(a => a.estudado).length > 0 ? (
-                                <ul style={{ margin: 0, marginLeft: 16, paddingRight: 4, maxHeight: 160, overflowY: "auto", fontSize: 12, color: "var(--text-3)" }}>
+                                <ul style={{ margin: 0, padding: 0, listStyle: "none", paddingRight: 4, maxHeight: 160, overflowY: "auto", fontSize: 12, color: "var(--text-3)" }}>
                                   {d.assuntos.filter(a => a.estudado).map((assunto, index) => (
-                                    <li key={index} style={{ marginBottom: 4 }}>{assunto.nome}</li>
+                                    <li key={index} style={{ marginBottom: 4 }}>
+                                      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                                        <input
+                                          type="checkbox"
+                                          checked={assunto.progresso === 100}
+                                          onChange={() => marcarAssunto(assunto.id, assunto.progresso !== 100)}
+                                          style={{ width: 14, height: 14, cursor: "pointer", flexShrink: 0 }}
+                                        />
+                                        <span style={{ textDecoration: assunto.progresso === 100 ? "line-through" : "none" }}>{assunto.nome}</span>
+                                      </label>
+                                    </li>
                                   ))}
                                 </ul>
                               ) : (
@@ -379,9 +395,19 @@ export default function Dashboard() {
                             <div style={{ background: "var(--gray-50)", borderRadius: "var(--radius-md)", padding: 12 }}>
                               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Pendentes ({d.assuntos?.filter(a => !a.estudado).length || 0})</div>
                               {d.assuntos?.filter(a => !a.estudado).length > 0 ? (
-                                <ul style={{ margin: 0, marginLeft: 16, paddingRight: 4, maxHeight: 160, overflowY: "auto", fontSize: 12, color: "var(--text-3)" }}>
+                                <ul style={{ margin: 0, padding: 0, listStyle: "none", paddingRight: 4, maxHeight: 160, overflowY: "auto", fontSize: 12, color: "var(--text-3)" }}>
                                   {d.assuntos.filter(a => !a.estudado).map((assunto, index) => (
-                                    <li key={index} style={{ marginBottom: 4 }}>{assunto.nome}</li>
+                                    <li key={index} style={{ marginBottom: 4 }}>
+                                      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                                        <input
+                                          type="checkbox"
+                                          checked={assunto.progresso === 100}
+                                          onChange={() => marcarAssunto(assunto.id, assunto.progresso !== 100)}
+                                          style={{ width: 14, height: 14, cursor: "pointer", flexShrink: 0 }}
+                                        />
+                                        <span style={{ textDecoration: assunto.progresso === 100 ? "line-through" : "none" }}>{assunto.nome}</span>
+                                      </label>
+                                    </li>
                                   ))}
                                 </ul>
                               ) : (

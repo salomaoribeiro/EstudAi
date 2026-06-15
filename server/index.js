@@ -334,6 +334,85 @@ app.get("/api/editais/:eid/progresso", (req, res) => {
   });
 });
 
+// Comparar editais - assuntos em comum entre 2 ou mais editais
+app.get("/api/editais/comparar", (req, res) => {
+  const uid = req.query.uid;
+  const ids = (req.query.ids || "").split(",").map(s => s.trim()).filter(Boolean);
+  if (ids.length < 2) return err(res, "Selecione ao menos 2 editais");
+
+  const placeholders = ids.map(() => "?").join(",");
+
+  const editaisInfo = db.prepare(`SELECT id, nome, instituicao FROM editais WHERE id IN (${placeholders})`).all(...ids);
+  if (editaisInfo.length !== ids.length) return err(res, "Edital não encontrado", 404);
+
+  const rows = db.prepare(`
+    SELECT ac.id AS assunto_id, ac.nome AS assunto_nome,
+           e.id AS edital_id, e.nome AS edital_nome,
+           ed.nome AS disciplina_nome
+    FROM edital_assuntos ea
+    JOIN edital_disciplinas ed ON ed.id = ea.edital_disciplina_id
+    JOIN editais e ON e.id = ed.edital_id
+    JOIN assuntos_catalogo ac ON ac.id = ea.assunto_id
+    WHERE ed.edital_id IN (${placeholders})
+    ORDER BY ac.nome
+  `).all(...ids);
+
+  const getProgresso = db.prepare(`
+    SELECT progresso, status FROM usuario_progresso WHERE usuario_id = ? AND assunto_id = ?
+  `);
+
+  // monta, para cada assunto, a presença (disciplina) em cada edital selecionado
+  const map = new Map();
+  for (const r of rows) {
+    if (!map.has(r.assunto_id)) {
+      map.set(r.assunto_id, { assunto_id: r.assunto_id, nome: r.assunto_nome, porEdital: {} });
+    }
+    map.get(r.assunto_id).porEdital[r.edital_id] = { edital_nome: r.edital_nome, disciplina: r.disciplina_nome };
+  }
+
+  const getProgressoMemo = (assuntoId) => {
+    const prog = uid ? getProgresso.get(uid, assuntoId) : null;
+    return { progresso: prog?.progresso ?? 0, status: prog?.status ?? "nao_iniciado" };
+  };
+
+  const assuntos = [...map.values()].map(a => {
+    const presentes = ids.filter(id => a.porEdital[id]);
+    const idDisciplinaPrincipal = ids.find(id => a.porEdital[id]);
+    return {
+      assunto_id: a.assunto_id,
+      nome: a.nome,
+      porEdital: a.porEdital,
+      qtdEditais: presentes.length,
+      emTodos: presentes.length === ids.length,
+      disciplina_principal: a.porEdital[idDisciplinaPrincipal].disciplina,
+      ...getProgressoMemo(a.assunto_id),
+    };
+  });
+
+  assuntos.sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+
+  // agrupa por disciplina (do primeiro edital, na ordem selecionada, que contém o assunto)
+  const gruposMap = new Map();
+  for (const a of assuntos) {
+    if (!gruposMap.has(a.disciplina_principal)) gruposMap.set(a.disciplina_principal, []);
+    gruposMap.get(a.disciplina_principal).push(a);
+  }
+  const disciplinas = [...gruposMap.entries()]
+    .map(([disciplina, assuntos]) => ({ disciplina, assuntos }))
+    .sort((a, b) => a.disciplina.localeCompare(b.disciplina, "pt-BR"));
+
+  const comuns = assuntos.filter(a => a.emTodos);
+  const proximoSugerido = comuns.find(a => a.status !== "concluido") || null;
+
+  ok(res, {
+    editais: editaisInfo,
+    disciplinas,
+    totalAssuntos: assuntos.length,
+    totalComuns: comuns.length,
+    proximoSugerido,
+  });
+});
+
 app.put("/api/editais/:id", (req, res) => {
   const { nome, instituicao, data_prova, descricao, disciplinas } = req.body;
   const id = req.params.id;

@@ -16,6 +16,11 @@ export default function Editais() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [editalMap, setEditalMap] = useState({});
+  const [compararModal, setCompararModal] = useState(false);
+  const [compararSelecionados, setCompararSelecionados] = useState([]);
+  const [comparando, setComparando] = useState(false);
+  const [erroComparar, setErroComparar] = useState("");
+  const [comparacao, setComparacao] = useState(null);
 
   async function load() {
     // Carrega todos os editais (com informação de inscrição)
@@ -104,6 +109,27 @@ export default function Editais() {
     }
   }
 
+  function toggleComparar(id) {
+    setCompararSelecionados(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  }
+
+  async function handleComparar() {
+    if (compararSelecionados.length < 2) return;
+    setComparando(true);
+    setErroComparar("");
+    try {
+      const data = await api.compararEditais(usuario.id, compararSelecionados);
+      setComparacao(data);
+      setCompararModal(false);
+    } catch (e) {
+      setErroComparar(e.message);
+    } finally {
+      setComparando(false);
+    }
+  }
+
   async function openDetalhe(editalId) {
     try {
       const data = await api.getEditalProgresso(editalId, usuario.id);
@@ -128,6 +154,10 @@ export default function Editais() {
     );
   }
 
+  if (comparacao) {
+    return <TelaComparacao data={comparacao} onBack={() => setComparacao(null)} />;
+  }
+
   // Filtrar editais baseado na busca
   const editaisFiltrados = editais.filter(e =>
     e.nome.toLowerCase().includes(busca.toLowerCase()) ||
@@ -141,9 +171,22 @@ export default function Editais() {
           <div className="page-title">📋 Editais</div>
           <div className="page-sub">Acompanhe sua preparação para concursos</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setModal(true)}>
-          + Novo Edital
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="btn"
+            style={{ background: "var(--border)", color: "var(--text)" }}
+            onClick={() => {
+              setCompararSelecionados([]);
+              setErroComparar("");
+              setCompararModal(true);
+            }}
+          >
+            🔀 Comparar Editais
+          </button>
+          <button className="btn btn-primary" onClick={() => setModal(true)}>
+            + Novo Edital
+          </button>
+        </div>
       </div>
 
       <div className="page-body">
@@ -301,6 +344,64 @@ export default function Editais() {
                 style={{ background: "#ef4444", flex: 1 }}
               >
                 {deletingId === confirmDelete ? "Removendo..." : "Remover"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {compararModal && (
+        <div className="modal-overlay" onClick={() => setCompararModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ marginBottom: 8 }}>Comparar Editais</h2>
+            <div style={{ fontSize: 13, color: "var(--text-3)", marginBottom: 16 }}>
+              Selecione 2 ou mais editais para ver os assuntos em comum entre eles.
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 320, overflowY: "auto", marginBottom: 16 }}>
+              {editais.map((e) => (
+                <label
+                  key={e.id}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10, padding: "8px 10px",
+                    border: "1px solid var(--border)", borderRadius: "var(--radius-md)", cursor: "pointer"
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={compararSelecionados.includes(e.id)}
+                    onChange={() => toggleComparar(e.id)}
+                    style={{ width: 16, height: 16, cursor: "pointer" }}
+                  />
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 500 }}>{e.nome}</div>
+                    <div style={{ fontSize: 12, color: "var(--text-3)" }}>{e.instituicao}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            {erroComparar && (
+              <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 12 }}>{erroComparar}</div>
+            )}
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={compararSelecionados.length < 2 || comparando}
+                onClick={handleComparar}
+                style={{ flex: 1 }}
+              >
+                {comparando ? "Comparando..." : `Comparar (${compararSelecionados.length})`}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setCompararModal(false)}
+                style={{ background: "var(--border)", color: "var(--text)" }}
+              >
+                Cancelar
               </button>
             </div>
           </div>
@@ -543,6 +644,175 @@ function TelaDetalheEdital({ edital, onBack, onEdit }) {
             );
           })}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function TelaComparacao({ data, onBack }) {
+  const { editais, disciplinas, totalAssuntos, totalComuns, proximoSugerido } = data;
+  const [busca, setBusca] = useState("");
+  const [expandidos, setExpandidos] = useState({});
+
+  const thStyle = { textAlign: "left", padding: "8px 10px", fontSize: 11, fontWeight: 600, color: "var(--text-3)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+  const thCenter = { ...thStyle, textAlign: "center" };
+  const tdStyle = { padding: "8px 10px", fontSize: 13, borderBottom: "1px solid var(--border)" };
+  const tdCenter = { ...tdStyle, textAlign: "center" };
+
+  const nomeAbreviado = (e) => e.nome.split(" - ")[0];
+
+  const termo = busca.trim().toLowerCase();
+  const gruposFiltrados = disciplinas
+    .map(g => ({ ...g, assuntos: g.assuntos.filter(a => a.nome.toLowerCase().includes(termo)) }))
+    .filter(g => g.assuntos.length > 0);
+  const totalFiltrado = gruposFiltrados.reduce((sum, g) => sum + g.assuntos.length, 0);
+
+  return (
+    <div>
+      <div className="page-header">
+        <div style={{ cursor: "pointer", color: "#2563eb", fontSize: 18 }} onClick={onBack}>
+          ← Editais
+        </div>
+      </div>
+
+      <div className="page-body">
+        <div style={{ marginBottom: 24, paddingBottom: 16, borderBottom: "1px solid var(--border)" }}>
+          <h1 style={{ fontSize: 22, marginBottom: 6 }}>🔀 Comparação de Editais</h1>
+          <div style={{ fontSize: 13, color: "var(--text-3)" }}>
+            {editais.map(e => e.nome).join("  •  ")}
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 24 }}>
+          <div className="card" style={{ textAlign: "center", padding: 16 }}>
+            <div style={{ fontSize: 28, fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>
+              {totalAssuntos}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-3)" }}>Assuntos no total</div>
+          </div>
+          <div className="card" style={{ textAlign: "center", padding: 16 }}>
+            <div style={{ fontSize: 28, fontWeight: 600, color: "#2563eb", marginBottom: 4 }}>
+              {totalComuns}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-3)" }}>Comuns a todos</div>
+          </div>
+          <div className="card" style={{ textAlign: "center", padding: 16 }}>
+            <div style={{ fontSize: 28, fontWeight: 600, color: "#10b981", marginBottom: 4 }}>
+              {disciplinas.reduce((sum, g) => sum + g.assuntos.filter(a => a.emTodos && a.status === "concluido").length, 0)}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-3)" }}>Comuns já concluídos</div>
+          </div>
+        </div>
+
+        {proximoSugerido && (
+          <div className="card" style={{ marginBottom: 24, background: "var(--green-50)", borderColor: "#3B6D11" }}>
+            <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 4 }}>
+              📌 Próximo assunto sugerido (comum a todos os editais selecionados)
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 600 }}>{proximoSugerido.nome}</div>
+            <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 6 }}>
+              Disciplina: {proximoSugerido.disciplina_principal}
+            </div>
+          </div>
+        )}
+
+        <div style={{ marginBottom: 16 }}>
+          <input
+            type="text"
+            placeholder="🔍 Buscar assunto..."
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            style={{
+              width: "100%", padding: "10px 14px", border: "1px solid var(--border)",
+              borderRadius: "var(--radius-md)", fontSize: 14, fontFamily: "inherit",
+              backgroundColor: "var(--surface)", color: "var(--text)", boxSizing: "border-box"
+            }}
+          />
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <h3 style={{ fontSize: 14, margin: 0 }}>Assuntos por disciplina ({totalFiltrado})</h3>
+          <div style={{ fontSize: 12, color: "var(--text-3)" }}>
+            <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "var(--green-50)", border: "1px solid #3B6D11", verticalAlign: "middle", marginRight: 4 }} />
+            comum a todos os editais selecionados
+          </div>
+        </div>
+
+        {gruposFiltrados.length === 0 ? (
+          <div className="empty-state">
+            <p>Nenhum assunto encontrado para "{busca}"</p>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {gruposFiltrados.map((g) => {
+              const isExpandido = !!termo || !!expandidos[g.disciplina];
+              const comunsNoGrupo = g.assuntos.filter(a => a.emTodos).length;
+              return (
+                <div key={g.disciplina}>
+                  <div
+                    className="card"
+                    style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: 12, background: "var(--bg-2)", cursor: "pointer", transition: "all 0.2s",
+                    }}
+                    onClick={() => setExpandidos({ ...expandidos, [g.disciplina]: !expandidos[g.disciplina] })}
+                    onMouseEnter={(el) => (el.currentTarget.style.background = "var(--gray-50)")}
+                    onMouseLeave={(el) => (el.currentTarget.style.background = "var(--bg-2)")}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 12, color: "var(--text-3)" }}>{isExpandido ? "▼" : "▶"}</span>
+                      <span style={{ fontWeight: 500 }}>{g.disciplina}</span>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      {comunsNoGrupo > 0 && (
+                        <span className="badge badge-blue">{comunsNoGrupo} comum{comunsNoGrupo > 1 ? "ns" : ""}</span>
+                      )}
+                      <span className="badge badge-gray">{g.assuntos.length} assunto{g.assuntos.length > 1 ? "s" : ""}</span>
+                    </div>
+                  </div>
+
+                  {isExpandido && (
+                    <div style={{ marginTop: 8, overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr>
+                            <th style={thStyle}>Assunto</th>
+                            {editais.map(e => (
+                              <th key={e.id} style={thCenter} title={e.nome}>{nomeAbreviado(e)}</th>
+                            ))}
+                            <th style={{ ...thCenter, minWidth: 110 }}>Progresso</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {g.assuntos.map((a) => (
+                            <tr key={a.assunto_id} style={{ background: a.emTodos ? "var(--green-50)" : "transparent" }}>
+                              <td style={tdStyle}>{a.nome}</td>
+                              {editais.map(e => (
+                                <td key={e.id} style={tdCenter}>
+                                  {a.porEdital[e.id]
+                                    ? <span style={{ color: "#10b981", fontWeight: 600 }} title={a.porEdital[e.id].disciplina}>✓</span>
+                                    : <span style={{ color: "var(--text-3)" }}>—</span>}
+                                </td>
+                              ))}
+                              <td style={tdCenter}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  <div className="prog-wrap" style={{ flex: 1 }}>
+                                    <div className="prog-fill" style={{ width: `${a.progresso}%` }} />
+                                  </div>
+                                  <span style={{ fontSize: 11, color: "var(--text-3)", minWidth: 30, textAlign: "right" }}>{a.progresso}%</span>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

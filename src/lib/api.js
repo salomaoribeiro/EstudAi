@@ -44,6 +44,7 @@ export const api = {
   addEdital: (data) => req("POST", `/editais`, data),
   updateEdital: (id, data) => req("PUT", `/editais/${id}`, data),
   getEditalProgresso: (eid, uid) => req("GET", `/editais/${eid}/progresso?uid=${uid}`),
+  compararEditais: (uid, ids) => req("GET", `/editais/comparar?uid=${uid}&ids=${ids.join(",")}`),
   deleteEdital: (id) => req("DELETE", `/editais/${id}`),
   inscreverEdital: (uid, eid) => req("POST", `/usuarios/${uid}/editais/${eid}/subscrever`, {}),
   desinscreverEdital: (uid, eid) => req("DELETE", `/usuarios/${uid}/editais/${eid}/subscrever`),

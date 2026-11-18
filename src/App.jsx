@@ -9,6 +9,7 @@ import Sessao from "./pages/Sessao";
 import Meta from "./pages/Meta";
 import Grupo from "./pages/Grupo";
 import Editais from "./pages/Editais";
+import Desempenho from "./pages/Desempenho";
 
 function Shell() {
   const { usuario } = useUsuario();
@@ -22,6 +23,7 @@ function Shell() {
           <Route path="/disciplinas" element={<Disciplinas />} />
           <Route path="/editais" element={<Editais />} />
           <Route path="/sessao" element={<Sessao />} />
+          <Route path="/desempenho" element={<Desempenho />} />
           <Route path="/meta" element={<Meta />} />
           <Route path="/grupo" element={<Grupo />} />
         </Routes>

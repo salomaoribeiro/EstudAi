@@ -43,6 +43,11 @@ db.exec(`
     assunto_id           INTEGER NOT NULL REFERENCES assuntos_catalogo(id) ON DELETE CASCADE,
     edital_disciplina_id INTEGER REFERENCES edital_disciplinas(id) ON DELETE SET NULL,
     duracao_min          INTEGER NOT NULL DEFAULT 0,
+    tempo_planejado_min  INTEGER NOT NULL DEFAULT 0,
+    paginas_lidas        INTEGER NOT NULL DEFAULT 0,
+    questoes_resolvidas  INTEGER NOT NULL DEFAULT 0,
+    acertos              INTEGER NOT NULL DEFAULT 0,
+    referencia           TEXT NOT NULL DEFAULT '',
     progresso_antes      INTEGER NOT NULL DEFAULT 0,
     progresso_depois     INTEGER NOT NULL DEFAULT 0,
     anotacao             TEXT DEFAULT '',
@@ -88,6 +93,19 @@ db.exec(`
     PRIMARY KEY (usuario_id, edital_id)
   );
 `);
+
+// Migração incremental para bancos de dados criados antes do diário de estudo.
+const colunasSessoes = new Set(db.prepare("PRAGMA table_info(sessoes)").all().map(coluna => coluna.name));
+const novasColunasSessoes = [
+  ["tempo_planejado_min", "INTEGER NOT NULL DEFAULT 0"],
+  ["paginas_lidas", "INTEGER NOT NULL DEFAULT 0"],
+  ["questoes_resolvidas", "INTEGER NOT NULL DEFAULT 0"],
+  ["acertos", "INTEGER NOT NULL DEFAULT 0"],
+  ["referencia", "TEXT NOT NULL DEFAULT ''"],
+];
+for (const [nome, definicao] of novasColunasSessoes) {
+  if (!colunasSessoes.has(nome)) db.exec(`ALTER TABLE sessoes ADD COLUMN ${nome} ${definicao}`);
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function ok(res, data) { res.json({ ok: true, data }); }
@@ -524,17 +542,290 @@ app.get("/api/usuarios/:uid/sessoes", (req, res) => {
 
 app.post("/api/usuarios/:uid/sessoes", (req, res) => {
   const uid = req.params.uid;
-  const { assunto_id, disciplina_id, duracao_min, progresso_antes, progresso_depois, anotacao } = req.body;
+  const {
+    assunto_id,
+    disciplina_id,
+    duracao_min,
+    tempo_planejado_min,
+    paginas_lidas,
+    questoes_resolvidas,
+    acertos,
+    referencia,
+    progresso_antes,
+    progresso_depois,
+    assunto_concluido,
+    anotacao,
+  } = req.body;
+  const inteiroPositivo = valor => Number.isFinite(Number(valor)) ? Math.max(0, Math.floor(Number(valor))) : 0;
+  const assuntoId = inteiroPositivo(assunto_id);
+  const disciplinaId = inteiroPositivo(disciplina_id);
+  const duracaoMin = inteiroPositivo(duracao_min);
+  const tempoPlanejadoMin = inteiroPositivo(tempo_planejado_min);
+  const paginas = inteiroPositivo(paginas_lidas);
+  const questoes = inteiroPositivo(questoes_resolvidas);
+  const respostasCorretas = inteiroPositivo(acertos);
+
+  if (!assuntoId || !db.prepare("SELECT 1 FROM assuntos_catalogo WHERE id = ?").get(assuntoId)) {
+    return err(res, "Assunto inválido");
+  }
+  if (!duracaoMin) return err(res, "Informe o tempo de estudo (mínimo de 1 minuto)");
+  if (respostasCorretas > questoes) return err(res, "O número de acertos não pode ser maior que o de questões resolvidas");
+  if (disciplinaId && !db.prepare("SELECT 1 FROM edital_assuntos WHERE edital_disciplina_id = ? AND assunto_id = ?").get(disciplinaId, assuntoId)) {
+    return err(res, "O assunto não pertence à disciplina selecionada");
+  }
+
+  const progressoAntes = inteiroPositivo(progresso_antes);
+  const progressoDepois = assunto_concluido ? 100 : Math.min(100, inteiroPositivo(progresso_depois));
 
   const r = db.prepare(`
-    INSERT INTO sessoes (usuario_id, assunto_id, edital_disciplina_id, duracao_min, progresso_antes, progresso_depois, anotacao)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(uid, assunto_id, disciplina_id || null, duracao_min, progresso_antes, progresso_depois, anotacao || "");
+    INSERT INTO sessoes (
+      usuario_id, assunto_id, edital_disciplina_id, duracao_min, tempo_planejado_min,
+      paginas_lidas, questoes_resolvidas, acertos, referencia,
+      progresso_antes, progresso_depois, anotacao
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    uid, assuntoId, disciplinaId || null, duracaoMin, tempoPlanejadoMin,
+    paginas, questoes, respostasCorretas, String(referencia || "").trim(),
+    progressoAntes, progressoDepois, anotacao || ""
+  );
 
-  const p = Math.max(0, Math.min(100, Number(progresso_depois)));
-  upsertProgresso(uid, assunto_id, p);
+  upsertProgresso(uid, assuntoId, progressoDepois);
 
   ok(res, db.prepare("SELECT * FROM sessoes WHERE id = ?").get(r.lastInsertRowid));
+});
+
+app.get("/api/usuarios/:uid/estudos/hoje", (req, res) => {
+  const resumo = db.prepare(`
+    SELECT
+      COUNT(DISTINCT CASE WHEN duracao_min > 0 THEN assunto_id END) AS assuntos_estudados,
+      COUNT(*) AS sessoes,
+      COALESCE(SUM(paginas_lidas), 0) AS paginas_lidas,
+      COALESCE(SUM(questoes_resolvidas), 0) AS questoes_resolvidas,
+      COALESCE(SUM(acertos), 0) AS acertos,
+      COALESCE(SUM(duracao_min), 0) AS minutos_estudados,
+      COALESCE(SUM(tempo_planejado_min), 0) AS minutos_planejados
+    FROM sessoes
+    WHERE usuario_id = ? AND date(data) = date('now', 'localtime')
+  `).get(req.params.uid);
+
+  ok(res, Object.fromEntries(Object.entries(resumo).map(([key, value]) => [key, Number(value) || 0])));
+});
+
+app.get("/api/usuarios/:uid/editais/:eid/desempenho", (req, res) => {
+  const { uid, eid } = req.params;
+  const edital = db.prepare("SELECT id, nome, instituicao, data_prova FROM editais WHERE id = ?").get(eid);
+  if (!edital) return err(res, "Edital não encontrado", 404);
+
+  const disciplinas = db.prepare(`
+    WITH topicos AS (
+      SELECT ed.id AS disciplina_id, ed.nome,
+             COUNT(ea.id) AS total_assuntos,
+              COALESCE(SUM(CASE WHEN COALESCE(up.progresso, 0) > 0 THEN 1 ELSE 0 END), 0) AS assuntos_estudados,
+              COALESCE(SUM(CASE WHEN COALESCE(up.progresso, 0) >= 100 THEN 1 ELSE 0 END), 0) AS assuntos_concluidos
+      FROM edital_disciplinas ed
+      LEFT JOIN edital_assuntos ea ON ea.edital_disciplina_id = ed.id
+      LEFT JOIN usuario_progresso up ON up.assunto_id = ea.assunto_id AND up.usuario_id = ?
+      WHERE ed.edital_id = ?
+      GROUP BY ed.id
+    ), sessoes_disciplina AS (
+      SELECT s.edital_disciplina_id AS disciplina_id,
+              COUNT(*) AS sessoes,
+             COALESCE(SUM(s.duracao_min), 0) AS minutos_estudados,
+             COALESCE(SUM(s.paginas_lidas), 0) AS paginas_lidas,
+             COALESCE(SUM(s.questoes_resolvidas), 0) AS questoes_resolvidas,
+             COALESCE(SUM(s.acertos), 0) AS acertos
+      FROM sessoes s
+      JOIN edital_disciplinas ed ON ed.id = s.edital_disciplina_id
+      WHERE s.usuario_id = ? AND ed.edital_id = ?
+      GROUP BY s.edital_disciplina_id
+    )
+    SELECT t.disciplina_id AS id, t.nome, t.total_assuntos, t.assuntos_estudados,
+           t.assuntos_concluidos,
+           COALESCE(s.sessoes, 0) AS sessoes,
+           COALESCE(s.minutos_estudados, 0) AS minutos_estudados,
+           COALESCE(s.paginas_lidas, 0) AS paginas_lidas,
+           COALESCE(s.questoes_resolvidas, 0) AS questoes_resolvidas,
+           COALESCE(s.acertos, 0) AS acertos
+    FROM topicos t
+    LEFT JOIN sessoes_disciplina s ON s.disciplina_id = t.disciplina_id
+    ORDER BY t.nome COLLATE NOCASE
+  `).all(uid, eid, uid, eid).map(disciplina => ({
+    ...disciplina,
+    progresso: disciplina.total_assuntos
+      ? Math.round((disciplina.assuntos_estudados / disciplina.total_assuntos) * 100)
+      : 0,
+    acerto_percentual: disciplina.questoes_resolvidas
+      ? Math.round((disciplina.acertos / disciplina.questoes_resolvidas) * 100)
+      : null,
+    horas_estudadas: Math.round((disciplina.minutos_estudados / 60) * 10) / 10,
+  }));
+
+  const atividade = db.prepare(`
+    SELECT date(s.data) AS dia,
+           COALESCE(SUM(s.duracao_min), 0) AS minutos_estudados,
+           COALESCE(SUM(s.questoes_resolvidas), 0) AS questoes_resolvidas,
+           COALESCE(SUM(s.acertos), 0) AS acertos,
+           COALESCE(SUM(s.paginas_lidas), 0) AS paginas_lidas,
+           COUNT(DISTINCT s.assunto_id) AS assuntos_estudados
+    FROM sessoes s
+    JOIN edital_disciplinas ed ON ed.id = s.edital_disciplina_id
+    WHERE s.usuario_id = ? AND ed.edital_id = ?
+      AND date(s.data) >= date('now', 'localtime', '-89 days')
+    GROUP BY date(s.data)
+    ORDER BY dia
+  `).all(uid, eid);
+
+  const resumo = disciplinas.reduce((total, disciplina) => {
+    total.total_assuntos += disciplina.total_assuntos;
+    total.assuntos_estudados += disciplina.assuntos_estudados;
+    total.assuntos_concluidos += disciplina.assuntos_concluidos;
+    total.minutos_estudados += disciplina.minutos_estudados;
+    total.paginas_lidas += disciplina.paginas_lidas;
+    total.questoes_resolvidas += disciplina.questoes_resolvidas;
+    total.acertos += disciplina.acertos;
+    return total;
+  }, {
+    total_assuntos: 0,
+    assuntos_estudados: 0,
+    assuntos_concluidos: 0,
+    minutos_estudados: 0,
+    paginas_lidas: 0,
+    questoes_resolvidas: 0,
+    acertos: 0,
+  });
+  resumo.cobertura = resumo.total_assuntos
+    ? Math.round((resumo.assuntos_estudados / resumo.total_assuntos) * 100)
+    : 0;
+  resumo.acerto_percentual = resumo.questoes_resolvidas
+    ? Math.round((resumo.acertos / resumo.questoes_resolvidas) * 100)
+    : null;
+  resumo.horas_estudadas = Math.round((resumo.minutos_estudados / 60) * 10) / 10;
+
+  ok(res, { edital, resumo, disciplinas, atividade });
+});
+
+app.get("/api/usuarios/:uid/editais/:eid/relatorio", (req, res) => {
+  const { uid, eid } = req.params;
+  const { inicio, fim } = req.query;
+  const edital = db.prepare("SELECT id, nome, instituicao FROM editais WHERE id = ?").get(eid);
+  if (!edital) return err(res, "Edital não encontrado", 404);
+
+  const dataValida = valor => {
+    if (typeof valor !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(valor)) return false;
+    const data = new Date(`${valor}T00:00:00.000Z`);
+    return !Number.isNaN(data.getTime()) && data.toISOString().slice(0, 10) === valor;
+  };
+  if (!dataValida(inicio) || !dataValida(fim)) {
+    return err(res, "Informe as datas inicio e fim no formato AAAA-MM-DD", 400);
+  }
+
+  const inicioMs = Date.parse(`${inicio}T00:00:00.000Z`);
+  const fimMs = Date.parse(`${fim}T00:00:00.000Z`);
+  const intervaloDias = Math.round((fimMs - inicioMs) / 86400000);
+  if (intervaloDias < 0) return err(res, "A data inicial deve ser anterior à data final", 400);
+  if (intervaloDias > 365) return err(res, "O período máximo do relatório é de 366 dias", 400);
+
+  const sessoes = db.prepare(`
+    SELECT s.id, date(s.data) AS dia, s.duracao_min, s.paginas_lidas,
+           s.questoes_resolvidas, s.acertos, s.referencia, s.anotacao,
+           ed.nome AS disciplina,
+           COALESCE(ea.nome_no_edital, ac.nome) AS assunto
+    FROM sessoes s
+    JOIN edital_disciplinas ed ON ed.id = s.edital_disciplina_id
+    JOIN editais e ON e.id = ed.edital_id
+    JOIN assuntos_catalogo ac ON ac.id = s.assunto_id
+    LEFT JOIN edital_assuntos ea
+      ON ea.edital_disciplina_id = ed.id AND ea.assunto_id = s.assunto_id
+    WHERE s.usuario_id = ? AND e.id = ? AND date(s.data) BETWEEN ? AND ?
+    ORDER BY date(s.data) DESC, s.data DESC, s.id DESC
+  `).all(uid, eid, inicio, fim);
+
+  const diasPorData = new Map();
+  for (const sessao of sessoes) {
+    if (!diasPorData.has(sessao.dia)) {
+      diasPorData.set(sessao.dia, {
+        dia: sessao.dia,
+        sessoes: 0,
+        minutos_estudados: 0,
+        paginas_lidas: 0,
+        questoes_resolvidas: 0,
+        acertos: 0,
+        assuntos: new Map(),
+      });
+    }
+    const dia = diasPorData.get(sessao.dia);
+    dia.sessoes += 1;
+    dia.minutos_estudados += Number(sessao.duracao_min) || 0;
+    dia.paginas_lidas += Number(sessao.paginas_lidas) || 0;
+    dia.questoes_resolvidas += Number(sessao.questoes_resolvidas) || 0;
+    dia.acertos += Number(sessao.acertos) || 0;
+
+    const chaveAssunto = `${sessao.disciplina}\u0000${sessao.assunto}`;
+    if (!dia.assuntos.has(chaveAssunto)) {
+      dia.assuntos.set(chaveAssunto, {
+        disciplina: sessao.disciplina,
+        assunto: sessao.assunto,
+        sessoes: 0,
+        minutos_estudados: 0,
+        paginas_lidas: 0,
+        questoes_resolvidas: 0,
+        acertos: 0,
+      });
+    }
+    const assunto = dia.assuntos.get(chaveAssunto);
+    assunto.sessoes += 1;
+    assunto.minutos_estudados += Number(sessao.duracao_min) || 0;
+    assunto.paginas_lidas += Number(sessao.paginas_lidas) || 0;
+    assunto.questoes_resolvidas += Number(sessao.questoes_resolvidas) || 0;
+    assunto.acertos += Number(sessao.acertos) || 0;
+  }
+
+  const dias = [];
+  for (let timestamp = inicioMs; timestamp <= fimMs; timestamp += 86400000) {
+    const diaIso = new Date(timestamp).toISOString().slice(0, 10);
+    const registrado = diasPorData.get(diaIso);
+    dias.push(registrado
+      ? {
+          ...registrado,
+          assuntos: [...registrado.assuntos.values()].sort((a, b) => a.disciplina.localeCompare(b.disciplina, "pt-BR") || a.assunto.localeCompare(b.assunto, "pt-BR")),
+          sem_registro: false,
+        }
+      : {
+          dia: diaIso,
+          sessoes: 0,
+          minutos_estudados: 0,
+          paginas_lidas: 0,
+          questoes_resolvidas: 0,
+          acertos: 0,
+          assuntos: [],
+          sem_registro: true,
+        });
+  }
+
+  const resumo = dias.reduce((total, dia) => {
+    total.dias_com_registro += dia.sessoes > 0 ? 1 : 0;
+    total.dias_sem_registro += dia.sem_registro ? 1 : 0;
+    total.sessoes += dia.sessoes;
+    total.minutos_estudados += dia.minutos_estudados;
+    total.paginas_lidas += dia.paginas_lidas;
+    total.questoes_resolvidas += dia.questoes_resolvidas;
+    total.acertos += dia.acertos;
+    return total;
+  }, {
+    dias_no_periodo: dias.length,
+    dias_com_registro: 0,
+    dias_sem_registro: 0,
+    sessoes: 0,
+    minutos_estudados: 0,
+    paginas_lidas: 0,
+    questoes_resolvidas: 0,
+    acertos: 0,
+  });
+  resumo.acerto_percentual = resumo.questoes_resolvidas
+    ? Math.round((resumo.acertos / resumo.questoes_resolvidas) * 100)
+    : null;
+
+  ok(res, { edital, periodo: { inicio, fim }, resumo, dias: dias.reverse() });
 });
 
 // ── Config ────────────────────────────────────────────────────────────────────

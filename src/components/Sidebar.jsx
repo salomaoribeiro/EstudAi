@@ -7,6 +7,7 @@ const links = [
   { path: "/disciplinas", label: "Disciplinas",    icon: "◫" },
   { path: "/editais",     label: "Editais",        icon: "📋" },
   { path: "/sessao",      label: "Estudar",        icon: "▷" },
+  { path: "/desempenho",  label: "Desempenho",     icon: "↗" },
   { path: "/meta",        label: "Meta & prova",   icon: "◎" },
   { path: "/grupo",       label: "Grupo",          icon: "◈" },
 ];
@@ -30,7 +31,7 @@ export default function Sidebar() {
       </div>
       <nav style={{ flex:1 }}>
         {links.map(l => (
-          <div key={l.path} className={`nav-item ${pathname===l.path?"active":""}`} onClick={()=>navigate(l.path)}>
+          <div key={l.path} className={`nav-item ${pathname===l.path || (l.path === "/desempenho" && pathname.startsWith("/desempenho/"))?"active":""}`} onClick={()=>navigate(l.path)}>
             <span style={{ fontSize:16,width:17,textAlign:"center" }}>{l.icon}</span>
             {l.label}
           </div>

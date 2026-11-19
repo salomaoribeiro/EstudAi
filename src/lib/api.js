@@ -25,7 +25,10 @@ export const api = {
 
   // Sessões
   getSessoes: (uid) => req("GET", `/usuarios/${uid}/sessoes`),
+  getSessoesHoje: (uid) => req("GET", `/usuarios/${uid}/estudos/sessoes-hoje`),
   addSessao: (uid, data) => req("POST", `/usuarios/${uid}/sessoes`, data),
+  updateSessao: (uid, id, data) => req("PUT", `/usuarios/${uid}/sessoes/${id}`, data),
+  deleteSessao: (uid, id) => req("DELETE", `/usuarios/${uid}/sessoes/${id}`),
   getResumoEstudosHoje: (uid) => req("GET", `/usuarios/${uid}/estudos/hoje`),
   getDesempenhoEdital: (uid, eid) => req("GET", `/usuarios/${uid}/editais/${eid}/desempenho`),
   getRelatorioEdital: (uid, eid, inicio, fim) => req("GET", `/usuarios/${uid}/editais/${eid}/relatorio?${new URLSearchParams({ inicio, fim })}`),

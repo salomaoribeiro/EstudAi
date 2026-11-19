@@ -43,6 +43,10 @@ export default function Sessao() {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
   const [mensagem, setMensagem] = useState("");
+  const [buscaDisciplina, setBuscaDisciplina] = useState("");
+  const [sessoes, setSessoes] = useState([]);
+  const [sessaoEditando, setSessaoEditando] = useState(null);
+  const [sessaoExcluindo, setSessaoExcluindo] = useState(null);
   const inicioCronometro = useRef(null);
 
   const disciplina = disciplinas.find(item => item.id === Number(sel.disciplinaId));
@@ -51,6 +55,20 @@ export default function Sessao() {
   const indiceAssunto = assuntos.findIndex(item => item.id === Number(sel.assuntoId));
   const planejadoAtual = Number(tempoPlanejado) || 0;
   const porcentagemAcerto = Number(questoes) > 0 ? Math.round((Number(acertos) / Number(questoes)) * 100) : 0;
+  const disciplinasFiltradas = useMemo(() => {
+    const normalizar = valor => String(valor || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    const termo = normalizar(buscaDisciplina.trim());
+    if (!termo) return disciplinas;
+    return disciplinas.filter(disciplinaItem => {
+      if (normalizar(disciplinaItem.nome).includes(termo)) return true;
+      return (disciplinaItem.assuntos || []).some(assuntoItem =>
+        normalizar(assuntoItem.nome).includes(termo)
+      );
+    });
+  }, [disciplinas, buscaDisciplina]);
 
   const metricas = useMemo(() => ([
     { label: "ASSUNTOS ESTUDADOS", value: resumo.assuntos_estudados, hint: `${resumo.sessoes} sessões hoje`, color: "#3B6D11", icon: "◉" },
@@ -60,22 +78,25 @@ export default function Sessao() {
   ]), [resumo, planejadoAtual]);
 
   async function carregarDados() {
-    const [lista, dadosHoje] = await Promise.all([
+    const [lista, dadosHoje, listaSessoes] = await Promise.all([
       api.getDisciplinas(usuario.id),
       api.getResumoEstudosHoje(usuario.id),
+      api.getSessoesHoje(usuario.id),
     ]);
     setDisciplinas(lista);
     setResumo(dadosHoje || EMPTY_SUMMARY);
+    setSessoes(listaSessoes);
     return lista;
   }
 
   useEffect(() => {
     let ativo = true;
-    Promise.all([api.getDisciplinas(usuario.id), api.getResumoEstudosHoje(usuario.id)])
-      .then(([lista, dadosHoje]) => {
+    Promise.all([api.getDisciplinas(usuario.id), api.getResumoEstudosHoje(usuario.id), api.getSessoesHoje(usuario.id)])
+      .then(([lista, dadosHoje, listaSessoes]) => {
         if (!ativo) return;
         setDisciplinas(lista);
         setResumo(dadosHoje || EMPTY_SUMMARY);
+        setSessoes(listaSessoes);
         const primeiraDisciplina = lista.find(item => item.assuntos.length > 0);
         const primeiroAssunto = primeiraDisciplina?.assuntos.find(item => item.progresso < 100) || primeiraDisciplina?.assuntos[0];
         if (primeiraDisciplina) setSel({ disciplinaId: primeiraDisciplina.id, assuntoId: primeiroAssunto?.id || null });
@@ -188,12 +209,14 @@ export default function Sessao() {
         assunto_concluido: concluir,
         anotacao,
       });
-      const [lista, dadosHoje] = await Promise.all([
+      const [lista, dadosHoje, listaSessoes] = await Promise.all([
         api.getDisciplinas(usuario.id),
         api.getResumoEstudosHoje(usuario.id),
+        api.getSessoesHoje(usuario.id),
       ]);
       setDisciplinas(lista);
       setResumo(dadosHoje || EMPTY_SUMMARY);
+      setSessoes(listaSessoes);
       const avancar = event.nativeEvent.submitter?.value === "next";
       if (avancar) {
         const destino = proximoAssunto(lista, disciplina.id, assunto.id);
@@ -217,12 +240,76 @@ export default function Sessao() {
     }
   }
 
+  function abrirEdicaoSessao(sessao) {
+    setSessaoEditando({
+      ...sessao,
+      duracao_min: sessao.duracao_min || 0,
+      tempo_planejado_min: sessao.tempo_planejado_min || 0,
+      paginas_lidas: sessao.paginas_lidas || 0,
+      questoes_resolvidas: sessao.questoes_resolvidas || 0,
+      acertos: sessao.acertos || 0,
+      referencia: sessao.referencia || "",
+      anotacao: sessao.anotacao || "",
+    });
+  }
+
+  async function salvarEdicaoSessao(event) {
+    event.preventDefault();
+    setErro("");
+    try {
+      await api.updateSessao(usuario.id, sessaoEditando.id, {
+        duracao_min: Number(sessaoEditando.duracao_min) || 0,
+        tempo_planejado_min: Number(sessaoEditando.tempo_planejado_min) || 0,
+        paginas_lidas: Number(sessaoEditando.paginas_lidas) || 0,
+        questoes_resolvidas: Number(sessaoEditando.questoes_resolvidas) || 0,
+        acertos: Number(sessaoEditando.acertos) || 0,
+        referencia: sessaoEditando.referencia,
+        anotacao: sessaoEditando.anotacao,
+      });
+      const [dadosHoje, listaSessoes] = await Promise.all([
+        api.getResumoEstudosHoje(usuario.id),
+        api.getSessoesHoje(usuario.id),
+      ]);
+      setResumo(dadosHoje || EMPTY_SUMMARY);
+      setSessoes(listaSessoes);
+      setSessaoEditando(null);
+      setMensagem("Registro atualizado com sucesso.");
+    } catch (saveError) {
+      setErro(saveError.message || "Não foi possível atualizar o registro.");
+    }
+  }
+
+  async function excluirSessao() {
+    setErro("");
+    try {
+      await api.deleteSessao(usuario.id, sessaoExcluindo.id);
+      const [dadosHoje, listaSessoes] = await Promise.all([
+        api.getResumoEstudosHoje(usuario.id),
+        api.getSessoesHoje(usuario.id),
+      ]);
+      setResumo(dadosHoje || EMPTY_SUMMARY);
+      setSessoes(listaSessoes);
+      setSessaoExcluindo(null);
+      setMensagem("Registro removido com sucesso.");
+    } catch (deleteError) {
+      setErro(deleteError.message || "Não foi possível remover o registro.");
+    }
+  }
+
   function percentDisc(disc) {
     return disc.assuntos.length ? Math.round((disc.assuntos.filter(item => item.progresso >= 100).length / disc.assuntos.length) * 100) : 0;
   }
 
   function renderDisciplinaSelector() {
-    return disciplinas.map((disc, index) => {
+    if (!disciplinasFiltradas.length) {
+      return (
+        <div className="study-discipline-search-empty">
+          Nenhuma disciplina encontrada.
+        </div>
+      );
+    }
+
+    return disciplinasFiltradas.map((disc, index) => {
       const concluidos = disc.assuntos.filter(item => item.progresso >= 100).length;
       const ativa = disciplina?.id === disc.id;
       return (
@@ -286,6 +373,25 @@ export default function Sessao() {
                 <button type="button" className={modo === "abas" ? "active" : ""} onClick={() => setModo("abas")}>▣ Abas</button>
                 <button type="button" className={modo === "lista" ? "active" : ""} onClick={() => setModo("lista")}>☷ Lista</button>
               </div>
+            </div>
+
+            <div className="study-discipline-search-bar">
+              <label className="study-discipline-search">
+                <span aria-hidden="true">⌕</span>
+                <input
+                  type="search"
+                  value={buscaDisciplina}
+                  onChange={event => setBuscaDisciplina(event.target.value)}
+                  placeholder="Buscar disciplina ou assunto..."
+                  aria-label="Buscar disciplina ou assunto"
+                />
+              </label>
+              {buscaDisciplina && (
+                <>
+                  <small>{disciplinasFiltradas.length} de {disciplinas.length} disciplinas</small>
+                  <button type="button" className="study-discipline-search-clear" onClick={() => setBuscaDisciplina("")} title="Limpar busca" aria-label="Limpar busca">×</button>
+                </>
+              )}
             </div>
 
             {modo === "abas" && <div className="study-tabs">{renderDisciplinaSelector()}</div>}
@@ -381,9 +487,106 @@ export default function Sessao() {
                         </div>
                       </div>
                     </form>
+
+                    <section className="study-today-panel" aria-label="Estudos registrados hoje">
+                      <div className="study-today-heading">
+                        <div>
+                          <strong>Estudos registrados hoje</strong>
+                          <small>{sessoes.length ? `${sessoes.length} registro${sessoes.length === 1 ? "" : "s"} nesta sessão do dia` : "Nenhum registro feito hoje"}</small>
+                        </div>
+                        <span>{fmtDuration(resumo.minutos_estudados)}</span>
+                      </div>
+                      {sessoes.length ? (
+                        <div className="study-today-list">
+                          {sessoes.map(sessao => {
+                            const aproveitamento = Number(sessao.questoes_resolvidas)
+                              ? Math.round((Number(sessao.acertos) / Number(sessao.questoes_resolvidas)) * 100)
+                              : null;
+                            const hora = new Date(String(sessao.data).replace(" ", "T")).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+                            return (
+                              <article className="study-today-entry" key={sessao.id}>
+                                <div className="study-today-entry-icon">◷</div>
+                                <div className="study-today-entry-main">
+                                  <strong>{sessao.disciplina_nome || "Disciplina"}</strong>
+                                  <span>{sessao.assunto_nome}</span>
+                                  <small>{hora} · {fmtDuration(sessao.duracao_min)} · {sessao.paginas_lidas || 0} páginas · {sessao.questoes_resolvidas || 0} questões{aproveitamento !== null ? ` · ${aproveitamento}% acertos` : ""}</small>
+                                </div>
+                                <div className="study-today-entry-actions">
+                                  <button type="button" className="btn btn-sm" onClick={() => abrirEdicaoSessao(sessao)}>✎ Editar</button>
+                                  <button type="button" className="study-today-delete" onClick={() => setSessaoExcluindo(sessao)} title="Excluir registro" aria-label={`Excluir registro de ${sessao.assunto_nome}`}>🗑</button>
+                                </div>
+                              </article>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="study-today-empty">Ao registrar um estudo, ele aparecerá aqui.</div>
+                      )}
+                    </section>
                   </>
                 )}
               </div>
+              {sessaoEditando && (
+                <div className="modal-overlay" onClick={event => event.target === event.currentTarget && setSessaoEditando(null)}>
+                  <div className="modal" role="dialog" aria-modal="true" aria-labelledby="editar-sessao-title">
+                    <div className="modal-title" id="editar-sessao-title">Editar registro de estudo</div>
+                    <form onSubmit={salvarEdicaoSessao}>
+                      <div style={{ marginBottom: 14, padding: 10, borderRadius: 8, background: "var(--gray-50)", border: "1px solid var(--border)" }}>
+                        <strong style={{ display: "block", fontSize: 13 }}>{sessaoEditando.disciplina_nome}</strong>
+                        <span style={{ display: "block", marginTop: 3, fontSize: 12, color: "var(--text-3)" }}>{sessaoEditando.assunto_nome}</span>
+                      </div>
+                      <div className="study-form-grid">
+                        <label className="study-field">
+                          <span>NÚMERO DA AULA / LEI / VÍDEO</span>
+                          <input value={sessaoEditando.referencia} onChange={event => setSessaoEditando({ ...sessaoEditando, referencia: event.target.value })} />
+                        </label>
+                        <label className="study-field">
+                          <span>PÁGINAS LIDAS</span>
+                          <input type="number" min="0" value={sessaoEditando.paginas_lidas} onChange={event => setSessaoEditando({ ...sessaoEditando, paginas_lidas: event.target.value })} />
+                        </label>
+                        <label className="study-field">
+                          <span>QUESTÕES RESOLVIDAS</span>
+                          <input type="number" min="0" value={sessaoEditando.questoes_resolvidas} onChange={event => setSessaoEditando({ ...sessaoEditando, questoes_resolvidas: event.target.value })} />
+                        </label>
+                        <label className="study-field">
+                          <span>ACERTOS</span>
+                          <input type="number" min="0" max={Number(sessaoEditando.questoes_resolvidas) || 0} value={sessaoEditando.acertos} onChange={event => setSessaoEditando({ ...sessaoEditando, acertos: event.target.value })} />
+                        </label>
+                        <label className="study-field">
+                          <span>TEMPO PLANEJADO (MINUTOS)</span>
+                          <input type="number" min="0" step="5" value={sessaoEditando.tempo_planejado_min} onChange={event => setSessaoEditando({ ...sessaoEditando, tempo_planejado_min: event.target.value })} />
+                        </label>
+                        <label className="study-field">
+                          <span>TEMPO DE ESTUDO (MINUTOS)</span>
+                          <input type="number" min="1" value={sessaoEditando.duracao_min} onChange={event => setSessaoEditando({ ...sessaoEditando, duracao_min: event.target.value })} />
+                        </label>
+                        <label className="study-field study-notes-field">
+                          <span>OBSERVAÇÕES</span>
+                          <textarea rows="3" value={sessaoEditando.anotacao} onChange={event => setSessaoEditando({ ...sessaoEditando, anotacao: event.target.value })} />
+                        </label>
+                      </div>
+                      <div className="modal-footer">
+                        <button type="button" className="btn" onClick={() => setSessaoEditando(null)}>Cancelar</button>
+                        <button type="submit" className="btn btn-primary">Salvar alterações</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+              {sessaoExcluindo && (
+                <div className="modal-overlay" onClick={event => event.target === event.currentTarget && setSessaoExcluindo(null)}>
+                  <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth: 390 }}>
+                    <div className="modal-title">Excluir registro?</div>
+                    <div style={{ fontSize: 13, color: "var(--text-3)", lineHeight: 1.6 }}>
+                      O registro de <strong style={{ color: "var(--text)" }}>{sessaoExcluindo.assunto_nome}</strong> será removido do resumo de hoje.
+                    </div>
+                    <div className="modal-footer">
+                      <button type="button" className="btn" onClick={() => setSessaoExcluindo(null)}>Cancelar</button>
+                      <button type="button" className="btn btn-primary" style={{ background: "#ef4444" }} onClick={excluirSessao}>Excluir</button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </section>
         )}

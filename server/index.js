@@ -8,6 +8,26 @@ const PORT = process.env.PORT || 3001;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, "../data/estudai.db");
 const db = new Database(DB_PATH);
 
+function dataLocalSaoPaulo(diasAtras = 0) {
+  const agora = new Date();
+  const partes = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(agora).reduce((resultado, parte) => {
+    if (parte.type !== "literal") resultado[parte.type] = parte.value;
+    return resultado;
+  }, {});
+  const data = new Date(`${partes.year}-${partes.month}-${partes.day}T12:00:00`);
+  data.setDate(data.getDate() - diasAtras);
+  return [
+    data.getFullYear(),
+    String(data.getMonth() + 1).padStart(2, "0"),
+    String(data.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
 app.use(cors());
 app.use(express.json());
 
@@ -594,7 +614,61 @@ app.post("/api/usuarios/:uid/sessoes", (req, res) => {
   ok(res, db.prepare("SELECT * FROM sessoes WHERE id = ?").get(r.lastInsertRowid));
 });
 
+app.put("/api/usuarios/:uid/sessoes/:id", (req, res) => {
+  const uid = Number(req.params.uid);
+  const id = Number(req.params.id);
+  const sessao = db.prepare("SELECT * FROM sessoes WHERE id = ? AND usuario_id = ?").get(id, uid);
+  if (!sessao) return err(res, "Registro de estudo não encontrado", 404);
+
+  const inteiroPositivo = valor => Number.isFinite(Number(valor)) ? Math.max(0, Math.floor(Number(valor))) : 0;
+  const duracaoMin = inteiroPositivo(req.body.duracao_min);
+  const tempoPlanejadoMin = inteiroPositivo(req.body.tempo_planejado_min);
+  const paginas = inteiroPositivo(req.body.paginas_lidas);
+  const questoes = inteiroPositivo(req.body.questoes_resolvidas);
+  const acertos = inteiroPositivo(req.body.acertos);
+  if (!duracaoMin) return err(res, "Informe o tempo de estudo (mínimo de 1 minuto)");
+  if (acertos > questoes) return err(res, "O número de acertos não pode ser maior que o de questões resolvidas");
+
+  db.prepare(`
+    UPDATE sessoes
+    SET duracao_min = ?, tempo_planejado_min = ?, paginas_lidas = ?,
+        questoes_resolvidas = ?, acertos = ?, referencia = ?, anotacao = ?
+    WHERE id = ? AND usuario_id = ?
+  `).run(
+    duracaoMin, tempoPlanejadoMin, paginas, questoes, acertos,
+    String(req.body.referencia || "").trim(), String(req.body.anotacao || ""),
+    id, uid
+  );
+
+  ok(res, db.prepare("SELECT * FROM sessoes WHERE id = ?").get(id));
+});
+
+app.delete("/api/usuarios/:uid/sessoes/:id", (req, res) => {
+  const uid = Number(req.params.uid);
+  const id = Number(req.params.id);
+  const sessao = db.prepare("SELECT * FROM sessoes WHERE id = ? AND usuario_id = ?").get(id, uid);
+  if (!sessao) return err(res, "Registro de estudo não encontrado", 404);
+
+  db.prepare("DELETE FROM sessoes WHERE id = ? AND usuario_id = ?").run(id, uid);
+  ok(res, { deleted: true, id });
+});
+
+app.get("/api/usuarios/:uid/estudos/sessoes-hoje", (req, res) => {
+  const uid = Number(req.params.uid);
+  const hoje = dataLocalSaoPaulo();
+  ok(res, db.prepare(`
+    SELECT s.*, ac.nome AS assunto_nome,
+           COALESCE(ed.nome, '') AS disciplina_nome
+    FROM sessoes s
+    JOIN assuntos_catalogo ac ON ac.id = s.assunto_id
+    LEFT JOIN edital_disciplinas ed ON ed.id = s.edital_disciplina_id
+    WHERE s.usuario_id = ? AND date(s.data) = ?
+    ORDER BY s.data DESC
+  `).all(uid, hoje));
+});
+
 app.get("/api/usuarios/:uid/estudos/hoje", (req, res) => {
+  const hoje = dataLocalSaoPaulo();
   const resumo = db.prepare(`
     SELECT
       COUNT(DISTINCT CASE WHEN duracao_min > 0 THEN assunto_id END) AS assuntos_estudados,
@@ -605,8 +679,8 @@ app.get("/api/usuarios/:uid/estudos/hoje", (req, res) => {
       COALESCE(SUM(duracao_min), 0) AS minutos_estudados,
       COALESCE(SUM(tempo_planejado_min), 0) AS minutos_planejados
     FROM sessoes
-    WHERE usuario_id = ? AND date(data) = date('now', 'localtime')
-  `).get(req.params.uid);
+    WHERE usuario_id = ? AND date(data) = ?
+  `).get(req.params.uid, hoje);
 
   ok(res, Object.fromEntries(Object.entries(resumo).map(([key, value]) => [key, Number(value) || 0])));
 });
@@ -670,10 +744,10 @@ app.get("/api/usuarios/:uid/editais/:eid/desempenho", (req, res) => {
     FROM sessoes s
     JOIN edital_disciplinas ed ON ed.id = s.edital_disciplina_id
     WHERE s.usuario_id = ? AND ed.edital_id = ?
-      AND date(s.data) >= date('now', 'localtime', '-89 days')
+      AND date(s.data) >= ?
     GROUP BY date(s.data)
     ORDER BY dia
-  `).all(uid, eid);
+  `).all(uid, eid, dataLocalSaoPaulo(89));
 
   const resumo = disciplinas.reduce((total, disciplina) => {
     total.total_assuntos += disciplina.total_assuntos;
@@ -857,7 +931,7 @@ app.get("/api/grupo", (req, res) => {
     FROM usuario_progresso WHERE usuario_id = ?
   `);
 
-  const hojeStr = new Date().toISOString().slice(0, 10);
+  const hojeStr = dataLocalSaoPaulo();
 
   const resultado = usuarios.map(u => {
     const { total, concluidos } = getProgresso.get(u.id);
@@ -884,7 +958,7 @@ function calcStreak(uid) {
   `).all(uid).map(r => r.dia);
   if (!dias.length) return 0;
   let streak = 0;
-  let cursor = new Date(); cursor.setHours(0,0,0,0);
+  let cursor = new Date(`${dataLocalSaoPaulo()}T12:00:00`);
   for (const dia of dias) {
     const d = new Date(dia + "T00:00:00");
     const diff = Math.round((cursor - d) / 86400000);
@@ -897,7 +971,7 @@ function calcStreak(uid) {
 // ── Estatísticas ──────────────────────────────────────────────────────────────
 app.get("/api/usuarios/:uid/stats", (req, res) => {
   const uid = req.params.uid;
-  const hojeStr = new Date().toISOString().slice(0, 10);
+  const hojeStr = dataLocalSaoPaulo();
 
   const minHoje = db.prepare(`
     SELECT COALESCE(SUM(duracao_min),0) AS total FROM sessoes

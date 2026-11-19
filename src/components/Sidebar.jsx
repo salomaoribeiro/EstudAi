@@ -5,7 +5,7 @@ import { useTheme } from "../hooks/useTheme";
 const links = [
   { path: "/",            label: "Dashboard",      icon: "⊞" },
   { path: "/disciplinas", label: "Disciplinas",    icon: "◫" },
-  { path: "/editais",     label: "Editais",        icon: "📋" },
+  { path: "/editais",     label: "Editais",        icon: "▤" },
   { path: "/sessao",      label: "Estudar",        icon: "▷" },
   { path: "/desempenho",  label: "Desempenho",     icon: "↗" },
   { path: "/meta",        label: "Meta & prova",   icon: "◎" },

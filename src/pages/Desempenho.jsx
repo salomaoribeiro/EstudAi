@@ -36,8 +36,18 @@ function percentual(value) {
 
 function criarAtividade90Dias(registros = []) {
   const mapa = new Map(registros.map(item => [item.dia, item]));
-  const hoje = new Date();
+  const hojeNavegador = new Date();
+  hojeNavegador.setHours(0, 0, 0, 0);
+  const ultimaDataComAtividade = registros
+    .map(item => String(item.dia || ""))
+    .filter(Boolean)
+    .sort()
+    .at(-1);
+  const hoje = ultimaDataComAtividade
+    ? new Date(`${ultimaDataComAtividade}T12:00:00`)
+    : hojeNavegador;
   hoje.setHours(0, 0, 0, 0);
+  if (hoje < hojeNavegador) hoje.setTime(hojeNavegador.getTime());
   return Array.from({ length: 90 }, (_, indice) => {
     const dia = new Date(hoje);
     dia.setDate(hoje.getDate() - (89 - indice));

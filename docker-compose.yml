@@ -13,4 +13,5 @@ services:
     environment:
       - NODE_ENV=production
       - DB_PATH=/data/estudai.db
+      - TZ=America/Sao_Paulo
     restart: unless-stopped

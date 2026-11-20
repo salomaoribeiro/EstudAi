@@ -28,6 +28,24 @@ function dataLocalSaoPaulo(diasAtras = 0) {
   ].join("-");
 }
 
+function dataHoraLocalSaoPaulo() {
+  const agora = new Date();
+  const partes = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(agora).reduce((resultado, parte) => {
+    if (parte.type !== "literal") resultado[parte.type] = parte.value;
+    return resultado;
+  }, {});
+  return `${partes.year}-${partes.month}-${partes.day} ${partes.hour}:${partes.minute}:${partes.second}`;
+}
+
 app.use(cors());
 app.use(express.json());
 
@@ -575,6 +593,7 @@ app.post("/api/usuarios/:uid/sessoes", (req, res) => {
     progresso_depois,
     assunto_concluido,
     anotacao,
+    data,
   } = req.body;
   const inteiroPositivo = valor => Number.isFinite(Number(valor)) ? Math.max(0, Math.floor(Number(valor))) : 0;
   const assuntoId = inteiroPositivo(assunto_id);
@@ -584,6 +603,17 @@ app.post("/api/usuarios/:uid/sessoes", (req, res) => {
   const paginas = inteiroPositivo(paginas_lidas);
   const questoes = inteiroPositivo(questoes_resolvidas);
   const respostasCorretas = inteiroPositivo(acertos);
+  const dataInformada = String(data || "").trim();
+  let dataSessao = dataHoraLocalSaoPaulo();
+  if (dataInformada) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dataInformada)) return err(res, "Data do estudo inválida");
+    const [ano, mes, dia] = dataInformada.split("-").map(Number);
+    const dataValida = new Date(Date.UTC(ano, mes - 1, dia));
+    if (dataValida.getUTCFullYear() !== ano || dataValida.getUTCMonth() !== mes - 1 || dataValida.getUTCDate() !== dia) {
+      return err(res, "Data do estudo inválida");
+    }
+    dataSessao = `${dataInformada} ${dataHoraLocalSaoPaulo().slice(11)}`;
+  }
 
   if (!assuntoId || !db.prepare("SELECT 1 FROM assuntos_catalogo WHERE id = ?").get(assuntoId)) {
     return err(res, "Assunto inválido");
@@ -601,12 +631,12 @@ app.post("/api/usuarios/:uid/sessoes", (req, res) => {
     INSERT INTO sessoes (
       usuario_id, assunto_id, edital_disciplina_id, duracao_min, tempo_planejado_min,
       paginas_lidas, questoes_resolvidas, acertos, referencia,
-      progresso_antes, progresso_depois, anotacao
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      progresso_antes, progresso_depois, anotacao, data
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     uid, assuntoId, disciplinaId || null, duracaoMin, tempoPlanejadoMin,
     paginas, questoes, respostasCorretas, String(referencia || "").trim(),
-    progressoAntes, progressoDepois, anotacao || ""
+    progressoAntes, progressoDepois, anotacao || "", dataSessao
   );
 
   upsertProgresso(uid, assuntoId, progressoDepois);
@@ -626,17 +656,30 @@ app.put("/api/usuarios/:uid/sessoes/:id", (req, res) => {
   const paginas = inteiroPositivo(req.body.paginas_lidas);
   const questoes = inteiroPositivo(req.body.questoes_resolvidas);
   const acertos = inteiroPositivo(req.body.acertos);
+  const dataInformada = String(req.body.data || "").trim();
   if (!duracaoMin) return err(res, "Informe o tempo de estudo (mínimo de 1 minuto)");
   if (acertos > questoes) return err(res, "O número de acertos não pode ser maior que o de questões resolvidas");
+
+  let dataSessao = sessao.data;
+  if (dataInformada) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dataInformada)) return err(res, "Data do estudo inválida");
+    const [ano, mes, dia] = dataInformada.split("-").map(Number);
+    const dataValida = new Date(Date.UTC(ano, mes - 1, dia));
+    if (dataValida.getUTCFullYear() !== ano || dataValida.getUTCMonth() !== mes - 1 || dataValida.getUTCDate() !== dia) {
+      return err(res, "Data do estudo inválida");
+    }
+    dataSessao = `${dataInformada} ${String(sessao.data || "").slice(11, 19) || dataHoraLocalSaoPaulo().slice(11)}`;
+  }
 
   db.prepare(`
     UPDATE sessoes
     SET duracao_min = ?, tempo_planejado_min = ?, paginas_lidas = ?,
-        questoes_resolvidas = ?, acertos = ?, referencia = ?, anotacao = ?
+        questoes_resolvidas = ?, acertos = ?, referencia = ?, anotacao = ?, data = ?
     WHERE id = ? AND usuario_id = ?
   `).run(
     duracaoMin, tempoPlanejadoMin, paginas, questoes, acertos,
     String(req.body.referencia || "").trim(), String(req.body.anotacao || ""),
+    dataSessao,
     id, uid
   );
 

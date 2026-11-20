@@ -13,6 +13,10 @@ function fmtDuration(minutes) {
   if (!value) return "—";
   return hours ? `${hours}h${mins ? ` ${pad(mins)}min` : ""}` : `${mins}min`;
 }
+function dataDeHoje() {
+  const agora = new Date();
+  return `${agora.getFullYear()}-${pad(agora.getMonth() + 1)}-${pad(agora.getDate())}`;
+}
 const EMPTY_SUMMARY = {
   assuntos_estudados: 0,
   sessoes: 0,
@@ -47,6 +51,7 @@ export default function Sessao() {
   const [sessoes, setSessoes] = useState([]);
   const [sessaoEditando, setSessaoEditando] = useState(null);
   const [sessaoExcluindo, setSessaoExcluindo] = useState(null);
+  const [dataEstudo, setDataEstudo] = useState(dataDeHoje());
   const inicioCronometro = useRef(null);
 
   const disciplina = disciplinas.find(item => item.id === Number(sel.disciplinaId));
@@ -114,6 +119,7 @@ export default function Sessao() {
   }, [cronometroAtivo]);
 
   function limparFormulario() {
+    setDataEstudo(dataDeHoje());
     setReferencia("");
     setPaginas(0);
     setQuestoes(0);
@@ -198,6 +204,7 @@ export default function Sessao() {
       await api.addSessao(usuario.id, {
         assunto_id: assunto.id,
         disciplina_id: disciplina.id,
+        data: dataEstudo,
         duracao_min: minutosEstudados,
         tempo_planejado_min: Number(tempoPlanejado) || 0,
         paginas_lidas: Number(paginas) || 0,
@@ -243,6 +250,7 @@ export default function Sessao() {
   function abrirEdicaoSessao(sessao) {
     setSessaoEditando({
       ...sessao,
+      data: String(sessao.data || "").slice(0, 10),
       duracao_min: sessao.duracao_min || 0,
       tempo_planejado_min: sessao.tempo_planejado_min || 0,
       paginas_lidas: sessao.paginas_lidas || 0,
@@ -258,6 +266,7 @@ export default function Sessao() {
     setErro("");
     try {
       await api.updateSessao(usuario.id, sessaoEditando.id, {
+        data: sessaoEditando.data,
         duracao_min: Number(sessaoEditando.duracao_min) || 0,
         tempo_planejado_min: Number(sessaoEditando.tempo_planejado_min) || 0,
         paginas_lidas: Number(sessaoEditando.paginas_lidas) || 0,
@@ -437,6 +446,10 @@ export default function Sessao() {
                       <h3 className="study-topic-name">{assunto.nome}</h3>
                       <div className="study-form-grid">
                         <label className="study-field">
+                          <span>DIA DO ESTUDO</span>
+                          <input type="date" value={dataEstudo} onChange={event => setDataEstudo(event.target.value)} />
+                        </label>
+                        <label className="study-field">
                           <span>NÚMERO DA AULA / LEI / VÍDEO</span>
                           <input value={referencia} onChange={event => setReferencia(event.target.value)} placeholder="Ex.: Aula 15, Lei 8.112/90, Vídeo 3" />
                         </label>
@@ -536,6 +549,10 @@ export default function Sessao() {
                         <span style={{ display: "block", marginTop: 3, fontSize: 12, color: "var(--text-3)" }}>{sessaoEditando.assunto_nome}</span>
                       </div>
                       <div className="study-form-grid">
+                        <label className="study-field">
+                          <span>DIA DO ESTUDO</span>
+                          <input type="date" value={sessaoEditando.data || ""} onChange={event => setSessaoEditando({ ...sessaoEditando, data: event.target.value })} />
+                        </label>
                         <label className="study-field">
                           <span>NÚMERO DA AULA / LEI / VÍDEO</span>
                           <input value={sessaoEditando.referencia} onChange={event => setSessaoEditando({ ...sessaoEditando, referencia: event.target.value })} />
